@@ -1,0 +1,4 @@
+scripts/** text eol=lf
+native/** text eol=lf
+patches/** text eol=lf
+patches/*.patch -whitespace

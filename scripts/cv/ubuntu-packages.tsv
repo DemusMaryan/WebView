@@ -1,0 +1,13 @@
+cmake	3.28.3-1build7
+g++	4:13.2.0-7ubuntu1
+g++-13	13.3.0-6ubuntu2~24.04.1
+libboost-serialization-dev:amd64	1.83.0.1ubuntu2
+libeigen3-dev	3.4.0-4build0.1
+libepoxy-dev:amd64	1.5.10-1build1
+libgl1-mesa-dev:amd64	25.2.8-0ubuntu0.24.04.4
+libglew-dev:amd64	2.2.0-4build1
+libjpeg-dev:amd64	8c-2ubuntu11
+libopencv-dev	4.6.0+dfsg-13.1ubuntu1
+libpng-dev:amd64	1.6.43-5ubuntu0.7
+libssl-dev:amd64	3.0.13-0ubuntu3.16
+python3-venv	3.12.3-0ubuntu2.1

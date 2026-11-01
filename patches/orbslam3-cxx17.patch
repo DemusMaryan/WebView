@@ -1,0 +1,11 @@
+--- a/include/LoopClosing.h
++++ b/include/LoopClosing.h
+@@ -226,7 +226,7 @@
+     bool mbFixScale;
+ 
+ 
+-    bool mnFullBAIdx;
++    int mnFullBAIdx;
+ 
+ 
+ 

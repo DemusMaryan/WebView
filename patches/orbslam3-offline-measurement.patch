@@ -1,0 +1,38 @@
+--- a/Examples/Monocular/mono_tum.cc
++++ b/Examples/Monocular/mono_tum.cc
+@@ -63,6 +63,7 @@
+ 
+     // Main loop
+     cv::Mat im;
++    int processedFrames = 0;
+     for(int ni=0; ni<nImages; ni++)
+     {
+         // Read image from file
+@@ -107,6 +108,7 @@
+ 
+         // Pass the image to the SLAM system
+         SLAM.TrackMonocular(im,tframe);
++        ++processedFrames;
+ 
+ #ifdef COMPILEDWITHC11
+         std::chrono::steady_clock::time_point t2 = std::chrono::steady_clock::now();
+@@ -123,16 +125,10 @@
+ 
+         vTimesTrack[ni]=ttrack;
+ 
+-        // Wait to load the next frame
+-        double T=0;
+-        if(ni<nImages-1)
+-            T = vTimestamps[ni+1]-tframe;
+-        else if(ni>0)
+-            T = tframe-vTimestamps[ni-1];
++        // Offline measurement: process without playback pacing.
++    }
+ 
+-        if(ttrack<T)
+-            usleep((T-ttrack)*1e6);
+-    }
++    cout << "Processed frames: " << processedFrames << endl;
+ 
+     // Stop all threads
+     SLAM.Shutdown();

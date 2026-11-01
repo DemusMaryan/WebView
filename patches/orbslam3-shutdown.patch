@@ -1,0 +1,123 @@
+--- a/include/LoopClosing.h
++++ b/include/LoopClosing.h
+@@ -30,6 +30,7 @@
+ 
+ #include <boost/algorithm/string.hpp>
+ #include <thread>
++#include <vector>
+ #include <mutex>
+ #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
+ 
+@@ -218,6 +219,8 @@
+     bool mbStopGBA;
+     std::mutex mMutexGBA;
+     std::thread* mpThreadGBA;
++    // Keep every previous GBA thread joinable until shutdown.
++    std::vector<std::thread*> mvRetiredGBAThreads;
+ 
+     // Fix scale in the stereo/RGB-D case
+     bool mbFixScale;
+--- a/src/LoopClosing.cc
++++ b/src/LoopClosing.cc
+@@ -305,6 +305,23 @@
+         usleep(5000);
+     }
+ 
++    // No new GBA can be launched after this loop exits. Join without holding
++    // mMutexGBA: each worker needs that mutex to finish its map update.
++    for (std::thread* worker : mvRetiredGBAThreads)
++    {
++        if (worker->joinable())
++            worker->join();
++        delete worker;
++    }
++    mvRetiredGBAThreads.clear();
++    if (mpThreadGBA)
++    {
++        if (mpThreadGBA->joinable())
++            mpThreadGBA->join();
++        delete mpThreadGBA;
++        mpThreadGBA = nullptr;
++    }
++
+     SetFinish();
+ }
+ 
+@@ -986,8 +1003,8 @@
+ 
+         if(mpThreadGBA)
+         {
+-            mpThreadGBA->detach();
+-            delete mpThreadGBA;
++            mvRetiredGBAThreads.push_back(mpThreadGBA);
++            mpThreadGBA = nullptr;
+         }
+         cout << "  Done!!" << endl;
+     }
+@@ -1203,6 +1220,12 @@
+         mbStopGBA = false;
+         mnCorrectionGBA = mnNumCorrection;
+ 
++        // A finished worker still owns a joinable thread handle.
++        if (mpThreadGBA)
++        {
++            mvRetiredGBAThreads.push_back(mpThreadGBA);
++            mpThreadGBA = nullptr;
++        }
+         mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
+     }
+ 
+@@ -1237,8 +1260,8 @@
+ 
+         if(mpThreadGBA)
+         {
+-            mpThreadGBA->detach();
+-            delete mpThreadGBA;
++            mvRetiredGBAThreads.push_back(mpThreadGBA);
++            mpThreadGBA = nullptr;
+         }
+         bRelaunchBA = true;
+     }
+@@ -1766,6 +1789,12 @@
+         mbRunningGBA = true;
+         mbFinishedGBA = false;
+         mbStopGBA = false;
++        // A finished worker still owns a joinable thread handle.
++        if (mpThreadGBA)
++        {
++            mvRetiredGBAThreads.push_back(mpThreadGBA);
++            mpThreadGBA = nullptr;
++        }
+         mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
+     }
+ 
+@@ -1810,8 +1839,8 @@
+ 
+         if(mpThreadGBA)
+         {
+-            mpThreadGBA->detach();
+-            delete mpThreadGBA;
++            mvRetiredGBAThreads.push_back(mpThreadGBA);
++            mpThreadGBA = nullptr;
+         }
+         bRelaunchBA = true;
+     }
+--- a/src/System.cc
++++ b/src/System.cc
+@@ -521,8 +521,15 @@
+ 
+     cout << "Shutdown" << endl;
+ 
++    // The mapper must remain alive while loop closing and GBA may request
++    // Stop/Release. Join them first to avoid the mapper Finish/Release lock
++    // inversion, then finish the mapper. No mutex is held across any join.
++    mpLoopCloser->RequestFinish();
++    if (mptLoopClosing && mptLoopClosing->joinable())
++        mptLoopClosing->join();
+     mpLocalMapper->RequestFinish();
+-    mpLoopCloser->RequestFinish();
++    if (mptLocalMapping && mptLocalMapping->joinable())
++        mptLocalMapping->join();
+     /*if(mpViewer)
+     {
+         mpViewer->RequestFinish();
