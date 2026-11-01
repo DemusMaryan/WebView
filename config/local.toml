@@ -1,0 +1,24 @@
+# Native WSL only. All listeners are loopback; this prototype has no authentication.
+[paths]
+cv_root = "~/.local/share/monotrajectoryweb"
+data_root = "~/.local/share/monotrajectoryweb/web"
+
+[ports]
+postgres = 55432
+api = 8000
+entry = 8080
+balancer = 8081
+compute_1 = 8101
+compute_2 = 8102
+
+[limits]
+file_bytes = 67108864
+duration_seconds = 40.0
+frames = 1200
+width = 1280
+height = 720
+execution_seconds = 180.0
+queued_jobs = 10
+snapshot_points = 256
+snapshot_trajectory = 240
+snapshot_interval_seconds = 0.5
