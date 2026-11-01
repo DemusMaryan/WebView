@@ -1,0 +1,444 @@
+--- a/include/Tracking.h
++++ b/include/Tracking.h
+@@ -40,6 +40,8 @@
+ #include "GeometricCamera.h"
+ 
+ #include <mutex>
++#include <cstdint>
++#include <map>
+ #include <unordered_set>
+ 
+ namespace ORB_SLAM3
+@@ -127,6 +129,18 @@
+         LOST=4,
+         OK_KLT=5
+     };
++
++    // Export metadata is captured at the existing Tcr calculation. It owns values
++    // only: no historical KeyFrame/MapPoint pointer is dereferenced by export.
++    struct ExportNumericFrame
++    {
++        unsigned long internal_frame_id;
++        double timestamp;
++        std::int64_t map_id;
++        unsigned long reference_id;
++        Sophus::SE3f Tcr;
++    };
++    std::map<double, ExportNumericFrame> mExportFrameRecords;
+ 
+     eTrackingState mState;
+     eTrackingState mLastProcessedState;
+--- a/src/Tracking.cc
++++ b/src/Tracking.cc
+@@ -2303,6 +2303,13 @@
+         if(mCurrentFrame.isSet())
+         {
+             Sophus::SE3f Tcr_ = mCurrentFrame.GetPose() * mCurrentFrame.mpReferenceKF->GetPoseInverse();
++            if (mState == OK && Tcr_.matrix().allFinite())
++            {
++                mExportFrameRecords[mCurrentFrame.mTimeStamp] = {
++                    mCurrentFrame.mnId, mCurrentFrame.mTimeStamp,
++                    static_cast<std::int64_t>(pCurrentMap->GetId()),
++                    mCurrentFrame.mpReferenceKF->mnId, Tcr_};
++            }
+             mlRelativeFramePoses.push_back(Tcr_);
+             mlpReferences.push_back(mCurrentFrame.mpReferenceKF);
+             mlFrameTimes.push_back(mCurrentFrame.mTimeStamp);
+--- a/include/LocalMapping.h
++++ b/include/LocalMapping.h
+@@ -28,6 +28,7 @@
+ #include "Settings.h"
+ 
+ #include <mutex>
++#include <atomic>
+ 
+ 
+ namespace ORB_SLAM3
+@@ -70,6 +71,8 @@
+ 
+     void RequestFinish();
+     bool isFinished();
++    bool ExportRunStarted() const { return mExportRunStarted.load(std::memory_order_acquire); }
++    bool ExportRunFinished() const { return mExportRunFinished.load(std::memory_order_acquire); }
+ 
+     int KeyframesInQueue(){
+         unique_lock<std::mutex> lock(mMutexNewKFs);
+@@ -154,6 +157,8 @@
+     void SetFinish();
+     bool mbFinishRequested;
+     bool mbFinished;
++    std::atomic<bool> mExportRunStarted{false};
++    std::atomic<bool> mExportRunFinished{false};
+     std::mutex mMutexFinish;
+ 
+     Atlas* mpAtlas;
+--- a/src/LocalMapping.cc
++++ b/src/LocalMapping.cc
+@@ -64,6 +64,7 @@
+ void LocalMapping::Run()
+ {
+     mbFinished = false;
++    mExportRunStarted.store(true, std::memory_order_release);
+ 
+     while(1)
+     {
+@@ -279,6 +280,8 @@
+     }
+ 
+     SetFinish();
++    // Publish completion only after every worker-side core lock is released.
++    mExportRunFinished.store(true, std::memory_order_release);
+ }
+ 
+ void LocalMapping::InsertKeyFrame(KeyFrame *pKF)
+--- a/include/LoopClosing.h
++++ b/include/LoopClosing.h
+@@ -31,6 +31,8 @@
+ #include <boost/algorithm/string.hpp>
+ #include <thread>
+ #include <mutex>
++#include <atomic>
++#include <cstddef>
+ #include "Thirdparty/g2o/g2o/types/types_seven_dof_expmap.h"
+ 
+ namespace ORB_SLAM3
+@@ -81,6 +83,9 @@
+     void RequestFinish();
+ 
+     bool isFinished();
++    bool ExportRunStarted() const { return mExportRunStarted.load(std::memory_order_acquire); }
++    bool ExportRunFinished() const { return mExportRunFinished.load(std::memory_order_acquire); }
++    std::size_t ExportActiveGbaCount() const { return mExportActiveGBA.load(std::memory_order_acquire); }
+ 
+     Viewer* mpViewer;
+ 
+@@ -154,6 +159,9 @@
+     void SetFinish();
+     bool mbFinishRequested;
+     bool mbFinished;
++    std::atomic<bool> mExportRunStarted{false};
++    std::atomic<bool> mExportRunFinished{false};
++    std::atomic<std::size_t> mExportActiveGBA{0};
+     std::mutex mMutexFinish;
+ 
+     Atlas* mpAtlas;
+--- a/src/LoopClosing.cc
++++ b/src/LoopClosing.cc
+@@ -90,6 +90,7 @@
+ void LoopClosing::Run()
+ {
+     mbFinished =false;
++    mExportRunStarted.store(true, std::memory_order_release);
+ 
+     while(1)
+     {
+@@ -306,6 +307,8 @@
+     }
+ 
+     SetFinish();
++    // Publish completion only after every worker-side core lock is released.
++    mExportRunFinished.store(true, std::memory_order_release);
+ }
+ 
+ void LoopClosing::InsertKeyFrame(KeyFrame *pKF)
+@@ -1203,7 +1206,17 @@
+         mbStopGBA = false;
+         mnCorrectionGBA = mnNumCorrection;
+ 
+-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
++        // Count before spawning, including a worker that has not started yet.
++        mExportActiveGBA.fetch_add(1, std::memory_order_release);
++        try
++        {
++            mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment, this, pLoopMap, mpCurrentKF->mnId);
++        }
++        catch (...)
++        {
++            mExportActiveGBA.fetch_sub(1, std::memory_order_release);
++            throw;
++        }
+     }
+ 
+     // Loop closed. Release Local Mapping.
+@@ -1766,7 +1779,17 @@
+         mbRunningGBA = true;
+         mbFinishedGBA = false;
+         mbStopGBA = false;
+-        mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
++        // Count before spawning, including a worker that has not started yet.
++        mExportActiveGBA.fetch_add(1, std::memory_order_release);
++        try
++        {
++            mpThreadGBA = new thread(&LoopClosing::RunGlobalBundleAdjustment,this, pMergeMap, mpCurrentKF->mnId);
++        }
++        catch (...)
++        {
++            mExportActiveGBA.fetch_sub(1, std::memory_order_release);
++            throw;
++        }
+     }
+ 
+     mpMergeMatchedKF->AddMergeEdge(mpCurrentKF);
+@@ -2266,7 +2289,15 @@
+ }
+ 
+ void LoopClosing::RunGlobalBundleAdjustment(Map* pActiveMap, unsigned long nLoopKF)
+-{  
++{
++    // This guard is destroyed after later local locks, on every return path.
++    // It also counts older workers detached by the unchanged upstream code.
++    struct ExportGbaCompletion
++    {
++        std::atomic<std::size_t>& active;
++        ~ExportGbaCompletion() { active.fetch_sub(1, std::memory_order_release); }
++    } export_completion{mExportActiveGBA};
++
+     Verbose::PrintMess("Starting Global Bundle Adjustment", Verbose::VERBOSITY_NORMAL);
+ 
+ #ifdef REGISTER_TIMES
+--- a/include/System.h
++++ b/include/System.h
+@@ -25,6 +25,9 @@
+ #include<stdio.h>
+ #include<stdlib.h>
+ #include<string>
++#include<cstddef>
++#include<cstdint>
++#include<vector>
+ #include<thread>
+ #include<opencv2/core/core.hpp>
+ 
+@@ -80,6 +83,47 @@
+ class LoopClosing;
+ class Settings;
+ 
++// All export objects own numeric values, never pointers into mutable maps.
++struct ExportMapPoint { unsigned long id; Eigen::Vector3f xyz; };
++struct ExportFramePose
++{
++    unsigned long internal_frame_id;
++    double timestamp;
++    Eigen::Matrix4f Twc;
++};
++struct ExportWorkerState
++{
++    bool mapper_started = false;
++    bool loop_started = false;
++    bool mapper_finished = false;
++    bool loop_finished = false;
++    std::size_t active_gba = 0;
++    bool workers_finished = false;
++};
++struct ExportSnapshot
++{
++    int tracking_state = -1;
++    bool pose_valid = false;
++    std::string pose_unavailable_reason = "tracking_not_ok";
++    double timestamp = 0.0;
++    std::int64_t map_id = -1;
++    int map_change_index = 0;
++    std::size_t points_total = 0;
++    std::size_t points_limit = 0;
++    std::size_t published_keyframes = 0;
++    std::size_t retained_numeric_records = 0;
++    std::size_t omitted_reference_poses = 0;
++    std::size_t omitted_other_map_poses = 0;
++    std::size_t omitted_nonfinite_poses = 0;
++    std::uint64_t geometry_digest = 0;
++    Eigen::Matrix4f Twc = Eigen::Matrix4f::Identity();
++    std::vector<ExportMapPoint> points;
++    std::vector<ExportFramePose> trajectory;
++    // Full geometry signature, including points beyond the output cap.
++    // Retained only for full/final snapshots and compared exactly by the driver.
++    std::vector<std::uint64_t> geometry_words;
++};
++
+ class System
+ {
+ public:
+@@ -173,6 +217,14 @@
+ 
+     // Information from most recent processed frame
+     // You can call this right after TrackMonocular (or stereo or RGBD)
++    // Owner-thread only, after TrackMonocular. Full snapshots use numeric frame
++    // metadata and currently published keyframes; unavailable refs are omitted.
++    ExportSnapshot GetMonocularSnapshot(std::size_t max_points = 2000,
++                                        bool include_history = false);
++    // Read-only observation after the unchanged upstream Shutdown request.
++    ExportWorkerState ObserveExportWorkers();
++    ExportWorkerState WaitForExportQuiescence(std::uint64_t timeout_ms = 60000);
++
+     int GetTrackingState();
+     std::vector<MapPoint*> GetTrackedMapPoints();
+     std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
+--- a/src/System.cc
++++ b/src/System.cc
+@@ -21,6 +21,11 @@
+ #include "System.h"
+ #include "Converter.h"
+ #include <thread>
++#include <algorithm>
++#include <chrono>
++#include <condition_variable>
++#include <cstring>
++#include <map>
+ #include <pangolin/pangolin.h>
+ #include <iomanip>
+ #include <openssl/md5.h>
+@@ -1318,6 +1323,156 @@
+ }
+ 
+ 
++ExportWorkerState System::ObserveExportWorkers()
++{
++    ExportWorkerState state;
++    state.mapper_started = mpLocalMapper->ExportRunStarted();
++    state.loop_started = mpLoopCloser->ExportRunStarted();
++    // Atomic telemetry cannot block on a potentially stuck core Finish mutex.
++    state.mapper_finished = state.mapper_started && mpLocalMapper->ExportRunFinished();
++    state.loop_finished = state.loop_started && mpLoopCloser->ExportRunFinished();
++    state.active_gba = mpLoopCloser->ExportActiveGbaCount();
++    state.workers_finished = state.mapper_finished && state.loop_finished && state.active_gba == 0;
++    return state;
++}
++
++ExportWorkerState System::WaitForExportQuiescence(std::uint64_t timeout_ms)
++{
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
++    std::mutex wait_mutex;
++    std::condition_variable wait_condition;
++    unique_lock<mutex> wait_lock(wait_mutex);
++    for (;;)
++    {
++        const ExportWorkerState state = ObserveExportWorkers();
++        if (state.workers_finished || !mbShutDown || std::chrono::steady_clock::now() >= deadline)
++            return state;
++        // Only the owner waits, after processing. No worker is paused or reordered.
++        const auto next_poll = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(2));
++        wait_condition.wait_until(wait_lock, next_poll);
++    }
++}
++
++ExportSnapshot System::GetMonocularSnapshot(std::size_t max_points, bool include_history)
++{
++    ExportSnapshot snapshot;
++    {
++        unique_lock<mutex> state_lock(mMutexState);
++        snapshot.tracking_state = mTrackingState;
++    }
++    snapshot.timestamp = mpTracker->mCurrentFrame.mTimeStamp;
++    snapshot.points_limit = std::min<std::size_t>(max_points, 100000);
++    snapshot.retained_numeric_records = mpTracker->mExportFrameRecords.size();
++    for (int attempt = 0; attempt < 4; ++attempt)
++    {
++        Map* map = mpAtlas->GetCurrentMap();
++        if (!map) return snapshot;
++        unique_lock<mutex> map_lock(map->mMutexMapUpdate);
++        if (map != mpAtlas->GetCurrentMap() || map->IsBad()) continue;
++        snapshot.map_id = static_cast<std::int64_t>(map->GetId());
++        snapshot.map_change_index = map->GetMapChangeIndex();
++
++        // Only published KFs are borrowed here. Upstream erases their map
++        // membership when culling; it does not physically delete these objects.
++        // Queued (potentially deleted) history references are never dereferenced.
++        std::map<unsigned long, Sophus::SE3f> published;
++        for (KeyFrame* keyframe : map->GetAllKeyFrames())
++        {
++            if (!keyframe || keyframe->isBad() || keyframe->GetMap() != map) continue;
++            const Sophus::SE3f pose = keyframe->GetPose();
++            if (pose.matrix().allFinite()) published.emplace(keyframe->mnId, pose);
++        }
++        snapshot.published_keyframes = published.size();
++        const auto reconstruct = [&published](const Tracking::ExportNumericFrame& record, Eigen::Matrix4f& Twc)
++        {
++            const auto reference = published.find(record.reference_id);
++            if (reference == published.end()) return false;
++            const Sophus::SE3f Tcw = record.Tcr * reference->second;
++            if (!Tcw.matrix().allFinite()) return false;
++            Twc = Tcw.inverse().matrix();
++            return Twc.allFinite();
++        };
++        const auto latest = mpTracker->mExportFrameRecords.find(snapshot.timestamp);
++        if (snapshot.tracking_state == Tracking::OK)
++        {
++            snapshot.pose_unavailable_reason = "numeric_record_unavailable";
++            if (latest != mpTracker->mExportFrameRecords.end())
++            {
++                snapshot.pose_unavailable_reason = "record_map_mismatch";
++                if (latest->second.map_id == snapshot.map_id)
++                {
++                    snapshot.pose_unavailable_reason = "reference_unavailable_or_nonfinite";
++                    snapshot.pose_valid = reconstruct(latest->second, snapshot.Twc);
++                    if (snapshot.pose_valid) snapshot.pose_unavailable_reason.clear();
++                }
++            }
++        }
++        if (include_history)
++        {
++            for (const auto& entry : mpTracker->mExportFrameRecords)
++            {
++                const auto& record = entry.second;
++                if (record.map_id != snapshot.map_id) { ++snapshot.omitted_other_map_poses; continue; }
++                if (published.count(record.reference_id) == 0) { ++snapshot.omitted_reference_poses; continue; }
++                ExportFramePose pose{record.internal_frame_id, record.timestamp, Eigen::Matrix4f::Identity()};
++                if (!reconstruct(record, pose.Twc)) { ++snapshot.omitted_nonfinite_poses; continue; }
++                snapshot.trajectory.push_back(pose);
++            }
++        }
++
++        std::vector<ExportMapPoint> all_points;
++        for (MapPoint* point : map->GetAllMapPoints())
++        {
++            if (!point || point->isBad() || point->GetMap() != map) continue;
++            const Eigen::Vector3f xyz = point->GetWorldPos();
++            if (xyz.allFinite() && !point->isBad()) all_points.push_back({point->mnId, xyz});
++        }
++        std::sort(all_points.begin(), all_points.end(), [](const ExportMapPoint& a, const ExportMapPoint& b) { return a.id < b.id; });
++        snapshot.points_total = all_points.size();
++        snapshot.points.assign(all_points.begin(), all_points.begin() + std::min(snapshot.points_limit, all_points.size()));
++
++        // FNV-1a over explicit numeric bit patterns, plus an exact word signature.
++        // Neither the point output cap nor a map change counter can hide changes.
++        std::uint64_t digest = UINT64_C(14695981039346656037);
++        const auto word = [&](std::uint64_t value)
++        {
++            if (include_history) snapshot.geometry_words.push_back(value);
++            for (int byte = 0; byte < 8; ++byte)
++            {
++                digest ^= (value >> (8 * byte)) & UINT64_C(255);
++                digest *= UINT64_C(1099511628211);
++            }
++        };
++        const auto number = [&](float value)
++        {
++            std::uint32_t bits;
++            std::memcpy(&bits, &value, sizeof(bits));
++            word(bits);
++        };
++        const auto matrix = [&](const Eigen::Matrix4f& value)
++        {
++            for (int row = 0; row < 4; ++row)
++                for (int column = 0; column < 4; ++column) number(value(row, column));
++        };
++        word(static_cast<std::uint64_t>(snapshot.map_id));
++        word(published.size());
++        for (const auto& keyframe : published) { word(keyframe.first); matrix(keyframe.second.matrix()); }
++        word(all_points.size());
++        for (const auto& point : all_points) { word(point.id); number(point.xyz.x()); number(point.xyz.y()); number(point.xyz.z()); }
++        word(snapshot.trajectory.size());
++        for (const auto& pose : snapshot.trajectory)
++        {
++            std::uint64_t timestamp_bits;
++            std::memcpy(&timestamp_bits, &pose.timestamp, sizeof(timestamp_bits));
++            word(pose.internal_frame_id); word(timestamp_bits); matrix(pose.Twc);
++        }
++        snapshot.geometry_digest = digest;
++        return snapshot; // Only values leave the lock; no JSON/I/O occurs here.
++    }
++    snapshot.pose_unavailable_reason = "map_unavailable";
++    return snapshot;
++}
++
+ int System::GetTrackingState()
+ {
+     unique_lock<mutex> lock(mMutexState);
