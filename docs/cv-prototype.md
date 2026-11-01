@@ -1,6 +1,6 @@
 # CV-прототип MonoTrajectoryWeb
 
-Виконується лише Промпт 2 у нативному WSL Ubuntu. **Baseline успішний; покадровий експортер ще не перевірено.** Промпт 3 не виконується.
+**Промпт 2 перевірено 1 листопада 2026 року у нативному WSL Ubuntu.** Реальні покадрові дані, фінальна підмножина траєкторії, точки й графік отримані; `validation.json`: `valid=true`, `data_valid=true`, `streaming_verified=true`, помилок немає. Промпт 3 і вебчастина не виконуються.
 
 ## Перевірений baseline
 
@@ -13,13 +13,41 @@
 | Час процесу | 44,027973 с: словник, читання кадрів, tracking/mapping, стандартний pacing, shutdown і збереження KF-траєкторії |
 | Покадрові валідні пози | Baseline окремо не експортує; кількість не виміряна |
 | Точки / проміжні JSONL | Baseline їх не експортує; кількість фінальних точок не виміряна |
-| Початок першої спроби | 31.10.2026 12:10:38 Europe/Kyiv (10:10:38 UTC) |
-| Перший успішний запуск | 12:48:07,997–12:48:52,025 Europe/Kyiv |
-| Час від початку до baseline-успіху | 38 хв 14 с; подальші перерви не є часом обчислення |
+| Початок першої спроби / baseline-успіх | 31.10.2026 12:10:38 / 12:48:52 Europe/Kyiv; 38 хв 14 с до baseline |
 
 44,03 с зі стандартним pacing не є чистою швидкістю обчислення. 38 ключових кадрів не є кількістю валідних покадрових поз.
 
-Докази у WSL: `/home/demus/.local/share/monotrajectoryweb/runs/baseline-upstream-20261031T1048/` — `baseline-summary.json`, `process.log`, `KeyFrameTrajectory.txt`, `TUM1-bgr.yaml`. Журнал збирання зі стандартним shutdown: `logs/build-upstream-shutdown.log`, остання ціль — зв’язування `mono_tum`.
+Докази: `/home/demus/.local/share/monotrajectoryweb/runs/baseline-upstream-20261031T1048/`. Локальні коміти: baseline — `e21d41d`; перевірений покадровий експорт — `0bcfe8b` (`feat(cv): export validated native monocular frames and sparse map`). Автор і комітер обох — `versal217 <versaldata@gmail.com>`. Експорт перевірено наступного дня; календарний розрив не є часом обчислення, сумарний активний час підготовки не відновлювався.
+
+## Перевірений покадровий експорт
+
+Запуск почався 01.11.2026 о 13:18:32,541 Europe/Kyiv (11:18:32,541 UTC), завершився з кодом 0 без тайм-ауту. Каталог: `/home/demus/.local/share/monotrajectoryweb/runs/export-verified-20261101-abi/`.
+
+| Показник | Факт із JSON і незалежної перевірки |
+| --- | --- |
+| Повнота входу | 798 записів `type=frame`, IDs 0–797 і timestamps точно відповідають `rgb.txt`, без пропусків |
+| Tracking / live-пози | 795 `OK`, 3 `NOT_INITIALIZED`; 689 узгоджених валідних поз; для 106 `OK`-кадрів опубліковане reference недоступне, поза явно `null` |
+| Фінальна траєкторія | 458 валідних поз-підмножини в `map_id=0`, `segment_id=0` |
+| Покриття числових записів | 795 збережено; 306 пропущено через недоступні/вилучені reference; 489 реконструйовано, з них 31 виключено через невалідний live snapshot |
+| Фінальні точки | `total=exported=2690`, `limit=100000`, `truncated=false` |
+| Live-точки | Максимум 2000 в одному записі; максимальний справжній total — 4207; metadata обмеження перевірені |
+| Геометрія | Twc, скінченність, ортонормальність, determinant +1 та узгодженість quaternion xyzw перевірені для 1147 live/final матриць |
+
+| Час | Секунди |
+| --- | --- |
+| Зовнішній процес / native total | 39,144386 / 38,363323 |
+| Startup / processing | 6,378937 / 31,586229 |
+| TrackMonocular, включно з числовим hook | 20,800955 |
+| Upstream Shutdown request / очікування завершення | 0,001152 / 0,377027 |
+| Два фінальні знімки | 0,003241 |
+
+25,264 кадр/с — виміряний processing pipeline із декодуванням RGB, обробкою, snapshot і JSONL без playback pacing; це не гарантія чистої швидкості SLAM. Координати мають відносний масштаб; метричну точність і похибку відносно ground truth не оцінювали.
+
+Незалежний observer прочитав повні записи під час живого процесу: 1, 30, 60, …, 780, 798 до появи final trajectory — 28 різних зростаючих кількостей у 29 спостереженнях. `mapper_started/finished`, `loop_started/finished` і `workers_finished=true`, `active_gba=0`. Одна точна перевірка **двох повних** знімків після завершення worker-ів підтвердила однакові geometry words; обидва digest — `3a1199df0253d237`. Підпис охоплює повну геометрію, включно з точками понад cap, не лише обмежений масив.
+
+![Справжня траєкторія й точки у відносних одиницях](figures/cv-trajectory.png)
+
+Графік побудовано з 458 final-поз і всіх 2690 експортованих точок, без згладжування, віддзеркалення чи downsampling; 103 розділені групи зберігають прогалини траєкторії. Масштаби осей рівні. Оригінал — `trajectory.png` у каталозі запуску; копія для звіту — `docs/figures/cv-trajectory.png` (475034 байти).
 
 ## Версії та розміщення
 
@@ -31,7 +59,7 @@
 | Ядро | Офіційний [ORB-SLAM3 4452a3c4ab75b1cde34e5505a36ec3f9edcdc4c4](https://github.com/UZ-SLAMLab/ORB_SLAM3/tree/4452a3c4ab75b1cde34e5505a36ec3f9edcdc4c4) |
 | Pangolin | [v0.8 aff6883c83f3fd7e8268a9715e84266c42e2efe3](https://github.com/stevenlovegrove/Pangolin/tree/aff6883c83f3fd7e8268a9715e84266c42e2efe3) |
 
-Точні версії Linux-пакетів — `scripts/cv/ubuntu-packages.tsv`. Великі вихідники, build, datasets і runs лежать у `/home/demus/.local/share/monotrajectoryweb`. Основний репозиторій не переносився й не дублювався. Docker, PostgreSQL, Nginx та вебчастина для цього етапу не запускаються.
+Точні Linux-пакети — `scripts/cv/ubuntu-packages.tsv`, Python-пакети native venv — `scripts/cv/requirements.lock`. Великі вихідники, build, datasets і runs лежать у `/home/demus/.local/share/monotrajectoryweb`; основний репозиторій не переносився й не дублювався. Docker, PostgreSQL, Nginx і вебчастина не запускалися.
 
 ## Вхід і калібрування
 
@@ -48,35 +76,37 @@
 
 У `TUM1-bgr.yaml` змінено тільки `Camera.RGB: 0`, бо `cv::imread` повертає BGR. Intrinsics і дисторсія незмінні. SHA-256 YAML: `7e102220272166ff3afc8d15be49be8a5ca03f1823bf31119468ee2b984b9ba9`.
 
-## Застосовані й відкладені патчі
+## Патчі та усунений збій
 
 - `orbslam3-cxx17.patch` — тип лічильника GBA `bool → int`, необхідний через заборону `++bool` у C++17.
 - `orbslam3-headless.patch` — лише `bUseViewer=false` у `mono_tum`.
 - Pangolin збирається з локальним `-include cstdint` для GCC 13; його вихідники незмінні.
-- `orbslam3-shutdown.patch` і `orbslam3-offline-measurement.patch` збережено окремо, **не застосовано**. `System.cc` і `LoopClosing.cc` baseline побайтово збігаються з upstream.
-- `LD_LIBRARY_PATH` налаштовується тільки для дочірнього процесу. Це усунуло перший runtime-збій `libpango_windowing.so: cannot open shared object file`, exit 127, без перекомпіляції й глобальних налаштувань.
+- Upstream-порядок Shutdown незмінний; власний shutdown-патч не застосовується. Snapshot-патч додає числові записи кадрів, узгоджені копії геометрії та спостереження завершення потоків, без переписування tracking/mapping. Після кадрів owner очікує завершення з опитуванням через 2 мс; це не демонстраційна затримка й не pacing обробки.
+- Окремий export driver працює без viewer і playback pacing. Бібліотеки знаходяться через локальний `LD_LIBRARY_PATH` дочірнього процесу, без глобального `ldconfig`.
+
+Початковий експорт завершувався `SIGSEGV` (код -11) після кадрів; gdb локалізував збій у `GetMonocularSnapshot`. Виявлено Eigen ABI mismatch між core з `-march=native` і драйвером з типовими прапорцями: alignment 16/32, розмір frame-pose 80/96, offset матриці 16/32 байти. Виправлення — відповідний `-march=native` для `mono_export` і перекомпіляція лише драйвера. Версії core/залежностей не змінювалися; SHA-256 бінарних DBoW2, g2o та Pangolin до/після виправлення незмінні.
 
 ## Відтворення
 
 PowerShell, робоча папка поточного репозиторію:
 
 ```powershell
-wsl -d Ubuntu --exec bash scripts/cv/run-baseline.sh
+wsl -d Ubuntu --exec bash scripts/cv/build-export-wsl.sh
+wsl -d Ubuntu --exec bash scripts/cv/run-export.sh
 ```
 
-Скрипт перевіряє архів і кадри та створює новий каталог запуску без перезапису результатів. Для підготовки іншої Ubuntu перед цим:
+Підготовлені залежності повторно збирати не потрібно. Native venv уже готовий; лише якщо його немає:
 
 ```powershell
-wsl -d Ubuntu -u root --exec bash scripts/cv/install-deps-wsl.sh
-wsl -d Ubuntu --exec bash scripts/cv/build-wsl.sh baseline
+wsl -d Ubuntu --exec bash scripts/cv/setup-python-wsl.sh
 ```
 
-На наявному середовищі залежності повторно збирати не потрібно. CMake збирає `mono_tum` та його залежності, не всі приклади.
+`run-export.sh` створює новий каталог без перезапису, спостерігає JSONL і запускає аналізатор з незалежним `rgb.txt`. Артефакти: `snapshots.jsonl`, `trajectory.json`, `map_points.json`, `native-summary.json`, `run-summary.json`, `validation.json`, `trajectory.png`. Для окремого стандартного прикладу з pacing: `wsl -d Ubuntu --exec bash scripts/cv/run-baseline.sh`.
 
-## Що залишається в Промпті 2
+## Межі перевірки
 
-Потрібно завершити й перевірити тонкий експортер: запис `frame` на кожний вхідний кадр; індекси 0–797; статус і `Twc=null` без валідного tracking; сегменти для різних систем координат карти; справжні поза/точки під час виконання. Конвенція — `Twc = inverse(Tcw)`, масштаб відносний, без заяв про метри.
+Конвенція — `Twc = inverse(Tcw)`, quaternion у порядку xyzw. Невалідні/недоступні пози позначені `null`; різні карти/сегменти та прогалини не з’єднуються на графіку. Перевірено лише одну реальну карту/сегмент, не всі reset/multi-map сценарії. П’ять stdlib unittest-перевірок point metadata/truncation пройшли у native venv; реальний final-масив у цьому запуску не обрізався.
 
-Фінальні `trajectory.json`, `map_points.json`, графік, кількість валідних покадрових поз, контракт обрізання та потокова узгодженість поки не перевірені. R1–R8 вебзастосунку залишаються запланованими. Автор і комітер локальних комітів — підтверджена ідентичність `versal217 <versaldata@gmail.com>`.
+Усі вихідні кадри мають записи, але final-пози є явно облікованою підмножиною через недоступні reference та невалідні live-пози. R1–R8 вебзастосунку залишаються запланованими; завантаження відеофайла, БД/API/UI та балансування належать наступним окремо дозволеним етапам.
 
 Push не виконувався.
