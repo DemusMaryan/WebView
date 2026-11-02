@@ -12,6 +12,7 @@ from .config import CV_ROOT, LIMITS
 from .contracts import JobParameters, empty_snapshot
 from .files import atomic_json, JsonlTail, read_json
 from .video import decode
+from .frame_work import retain_preview
 
 
 def check_pose(row):
@@ -53,6 +54,8 @@ def run(video, params, output, job_id, server_id):
     started = time.monotonic()
     base = {"job_id": job_id, "server_id": server_id, "scale": "relative", "coordinate_convention": "Twc"}
     def publish(values):
+        if values.get("frame_id") is not None:
+            retain_preview(output, values["frame_id"])
         atomic_json(output / "latest.json", empty_snapshot() | base | values)
     metadata = decode(video, output, params, publish)
     native = output / "native"

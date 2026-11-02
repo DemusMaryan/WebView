@@ -12,6 +12,7 @@ from .db import Job, Session, now
 from .files import atomic_json, read_json
 from .processes import identity, members, reap_group, subreaper, terminate_group
 from .capacity import ensure_space
+from .frame_work import cleanup_decoded_frames
 
 SERVER_ID = os.environ["MTW_SERVER_ID"]
 slot = asyncio.Lock()
@@ -27,6 +28,7 @@ async def lifespan(app):
     for job in stale:
         if job.worker_pid:
             await terminate_group(job.worker_pid, job.worker_start_ticks, job.id, job_dir(job.id))
+        cleanup_decoded_frames(job_dir(job.id), job.worker_pid)
         with Session.begin() as session:
             current = session.get(Job, job.id)
             current.status = current.stage = "cancelled" if current.cancel_requested else "failed"
@@ -131,6 +133,12 @@ async def execute(request: Execution):
                 reap_group(child.pid)
             status = "failed"
         finally:
+            try:
+                cleanup_decoded_frames(directory, child.pid if child else None)
+            except Exception as cleanup_error:
+                if status == "succeeded":
+                    status = "failed"
+                error = (error + "; " if error else "") + f"Frame cleanup failed: {cleanup_error}"
             elapsed = time.monotonic() - started
             with Session.begin() as session:
                 job = session.get(Job, request.job_id)

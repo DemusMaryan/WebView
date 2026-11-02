@@ -12,10 +12,11 @@ from starlette.concurrency import run_in_threadpool
 from .config import LIMITS, TERMINAL, job_dir
 from .contracts import JobParameters, empty_snapshot
 from .db import Job, Session, now, serialize
-from .files import read_json
+from .files import atomic_json, read_json
 from .capacity import ensure_space
+from .frame_work import POLICY, cleanup_decoded_frames
 
-app = FastAPI(title="MonoTrajectoryWeb local API", version="0.3.0")
+app = FastAPI(title="MonoTrajectoryWeb local API", version="0.4.0")
 
 
 class UploadLimit:
@@ -57,6 +58,12 @@ def health():
     return {"status": "ok", "service": "api", "authentication": "planned", "local_only": True}
 
 
+@app.get("/api/config")
+def public_config():
+    return {"limits": LIMITS, "poll_interval_ms": round(LIMITS["snapshot_interval_seconds"] * 1000),
+            "camera_model": "pinhole_opencv", "scale": "relative", "authentication": "planned"}
+
+
 @app.post("/api/jobs", status_code=202)
 async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated[str, Form(max_length=8192)]):
     try:
@@ -86,6 +93,7 @@ async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated
         if count == 0:
             raise HTTPException(422, "Empty video")
         (directory / "parameters.json").write_text(params.model_dump_json(), encoding="utf-8")
+        atomic_json(directory / "frame-work-policy.json", POLICY)
         def persist():
             with Session.begin() as session:
                 # Serialize admission so concurrent uploads cannot bypass the queue cap.
@@ -164,9 +172,12 @@ def frame(job_id: UUID, frame_id: int):
         job = get_job(session, job_id)
         if frame_id < 0 or frame_id >= job.parameters["frames"]:
             raise HTTPException(404, "Frame not found")
-    path = job_dir(job_id) / "sequence/rgb" / f"{frame_id:06d}.png"
+    directory = job_dir(job_id)
+    path = directory / "previews" / f"{frame_id:06d}.png"
+    if not path.is_file() and not (directory / "frame-work-policy.json").exists():
+        path = directory / "sequence/rgb" / f"{frame_id:06d}.png"
     if not path.is_file():
-        raise HTTPException(404, "Frame not decoded")
+        raise HTTPException(404, "Frame preview not published")
     return FileResponse(path, media_type="image/png", headers={"X-Frame-Id": str(frame_id)})
 
 
@@ -180,6 +191,7 @@ def cancel(job_id: UUID):
             job.cancel_requested = True
             job.updated_at = now()
             if job.status == "queued":
+                cleanup_decoded_frames(job_dir(job_id))
                 job.status = job.stage = "cancelled"
                 job.finished_at = now()
         return serialize(job)
