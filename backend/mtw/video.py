@@ -5,9 +5,11 @@ from pathlib import Path
 import av
 from .contracts import JobParameters, write_calibration
 from .files import atomic_json
+from .capacity import ensure_space
 
 
 def decode(video: Path, directory: Path, params: JobParameters, progress=lambda value: None):
+    ensure_space()
     if video.stat().st_size > params.file_bytes:
         raise ValueError("Video exceeds file_bytes limit")
     sequence = directory / "sequence"
@@ -21,6 +23,7 @@ def decode(video: Path, directory: Path, params: JobParameters, progress=lambda 
             raise ValueError("Exactly one video stream is required; audio/depth are not consumed")
         stream = container.streams.video[0]
         for frame in container.decode(stream):
+            ensure_space()
             # Check actual decoded frames, not only untrusted header metadata.
             count = len(timestamps)
             if count >= params.frames:

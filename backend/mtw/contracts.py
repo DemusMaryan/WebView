@@ -37,6 +37,16 @@ class JobParameters(BaseModel):
     execution_seconds: float = Field(default=LIMITS["execution_seconds"], ge=1, le=LIMITS["execution_seconds"])
 
 
+def empty_snapshot():
+    return {"processed_frames": 0, "total_frames": None, "frame_id": None, "timestamp": None,
+            "tracking_state": None, "tracking_state_name": None, "pose_valid": False,
+            "Twc": None, "quaternion_xyzw": None, "map_id": None, "segment_id": None,
+            "points": [], "points_total": 0, "points_exported": 0,
+            "points_limit": LIMITS["snapshot_points"], "points_truncated": False,
+            "trajectory": [], "trajectory_limit": LIMITS["snapshot_trajectory"], "frame_url": None,
+            "coordinate_convention": "Twc", "scale": "relative"}
+
+
 def write_calibration(calibration: Calibration, path, fps):
     # OpenCV imread(COLOR) supplies BGR. Camera intrinsics are always explicit.
     values = calibration.model_dump()

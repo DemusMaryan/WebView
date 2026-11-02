@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT="${MTW_VENV_ROOT:-$HOME/.local/share/monotrajectoryweb/web-venv}"
+case "$ROOT" in /mnt/*|/) echo 'Use a native WSL venv directory.' >&2; exit 1;; esac
+command -v nginx >/dev/null
+command -v ffmpeg >/dev/null
+test -x /usr/lib/postgresql/16/bin/initdb
+test -d "$ROOT" || python3 -m venv "$ROOT"
+if [[ -f "$REPO/backend/requirements.lock" ]]; then
+    "$ROOT/bin/pip" install -q -r "$REPO/backend/requirements.lock"
+else
+    "$ROOT/bin/pip" install -q -r "$REPO/backend/requirements.in"
+    "$ROOT/bin/pip" freeze > "$REPO/backend/requirements.lock"
+fi
+export PYTHONPATH="$REPO/backend"
+exec "$ROOT/bin/python" -m mtw.control setup

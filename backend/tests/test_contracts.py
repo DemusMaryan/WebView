@@ -2,12 +2,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import av
 from PIL import Image
 from mtw.contracts import JobParameters, write_calibration
 from mtw.files import JsonlTail
 from mtw.video import decode
 from mtw.worker import check_pose
+from mtw.capacity import ensure_space
 
 CALIBRATION = {"width": 64, "height": 48, "fx": 50, "fy": 50, "cx": 32, "cy": 24,
                "k1": 0, "k2": 0, "p1": 0, "p2": 0, "source": "synthetic decoder fixture; no SLAM claim"}
@@ -90,6 +92,13 @@ class Contracts(unittest.TestCase):
             check_pose(row | {"quaternion_xyzw": [1,0,0,0]})
         with self.assertRaises(ValueError):
             check_pose(row | {"Twc": None})
+
+    def test_backing_volume_can_be_full_while_native_vhd_reports_free_space(self):
+        from collections import namedtuple
+        usage = namedtuple("usage", "total used free")
+        with patch("mtw.capacity.shutil.disk_usage", side_effect=[usage(10**12, 0, 10**12), usage(10**12, 10**12, 0)]):
+            with self.assertRaisesRegex(ValueError, "Insufficient free space on /mnt/c"):
+                ensure_space()
 
 
 if __name__ == "__main__":

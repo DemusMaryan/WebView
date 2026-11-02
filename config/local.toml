@@ -22,3 +22,9 @@ queued_jobs = 10
 snapshot_points = 256
 snapshot_trajectory = 240
 snapshot_interval_seconds = 0.5
+
+[storage]
+# The current Ubuntu VHDX is backed by C:. Change this if the distro is moved.
+backing_mount = "/mnt/c"
+native_reserve_bytes = 2147483648
+backing_reserve_bytes = 5368709120
