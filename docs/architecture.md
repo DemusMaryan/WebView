@@ -1,6 +1,6 @@
 # Нативна архітектура
 
-Промпти 3–4 перевірено 02.11.2026. Усі компоненти запускаються нативно у WSL Ubuntu, без Docker. Frontend React/TypeScript/Vite/Three.js віддається власним Nginx на localhost:8080. Авторизація/HTTPS та Промпт 5 не виконуються. Поточні адреси, ліміти й шляхи централізовані у `config/local.toml`.
+Промпти 3–4 перевірено 02.11.2026; [аудит Промпта 5](day1-report.md) не змінює runtime. Усі компоненти запускаються нативно у WSL Ubuntu, без Docker. Frontend React/TypeScript/Vite/Three.js віддається власним Nginx на localhost:8080. Авторизація/HTTPS заплановані. Поточні адреси, ліміти й шляхи централізовані у `config/local.toml`.
 
 ```text
 Браузер (React / TypeScript / Vite / Three.js)
