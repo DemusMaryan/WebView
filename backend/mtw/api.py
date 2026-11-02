@@ -190,7 +190,7 @@ def cancel(job_id: UUID):
         if job.status not in TERMINAL:
             job.cancel_requested = True
             job.updated_at = now()
-            if job.status == "queued":
+            if job.status in {"queued", "dispatching"}:
                 cleanup_decoded_frames(job_dir(job_id))
                 job.status = job.stage = "cancelled"
                 job.finished_at = now()

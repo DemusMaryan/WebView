@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+export PYTHONPATH="$REPO/backend"
+cd -- "$REPO"
+exec "${MTW_VENV_ROOT:-$HOME/.local/share/monotrajectoryweb/web-venv}/bin/python" -m alembic -c backend/alembic.ini upgrade head

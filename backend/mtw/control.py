@@ -118,7 +118,8 @@ http {{
     default_type application/octet-stream;
     client_body_temp_path "{prefix}/client_temp";
     proxy_temp_path "{prefix}/proxy_temp";
-    log_format project '$time_iso8601 $request $status upstream=$upstream_addr';
+    log_format project '$time_iso8601 $request $status job=$http_x_mtw_job '
+                       'upstream=$upstream_addr server=$upstream_http_x_mtw_server';
     access_log "{DATA}/logs/nginx-access.log" project;
     client_max_body_size {LIMITS['file_bytes'] + 65536};
     upstream computes {{
