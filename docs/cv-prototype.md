@@ -1,6 +1,6 @@
 # CV-прототип MonoTrajectoryWeb
 
-**Промпт 2 перевірено 1 листопада 2026 року у нативному WSL Ubuntu.** Реальні покадрові дані, фінальна підмножина траєкторії, точки й графік отримані; `validation.json`: `valid=true`, `data_valid=true`, `streaming_verified=true`, помилок немає. Промпт 3 і вебчастина не виконуються.
+**Промпт 2 перевірено 1 листопада 2026 року у нативному WSL Ubuntu.** Реальні покадрові дані, фінальна підмножина траєкторії, точки й графік отримані; `validation.json`: `valid=true`, `data_valid=true`, `streaming_verified=true`, помилок немає. Ця сторінка фіксує історичний CV-етап; Промпт 3 завершено 02.11 без зміни ядра — див. [worker/PostgreSQL/API](backend-prototype.md). Frontend не реалізований.
 
 ## Перевірений baseline
 
@@ -59,7 +59,7 @@
 | Ядро | Офіційний [ORB-SLAM3 4452a3c4ab75b1cde34e5505a36ec3f9edcdc4c4](https://github.com/UZ-SLAMLab/ORB_SLAM3/tree/4452a3c4ab75b1cde34e5505a36ec3f9edcdc4c4) |
 | Pangolin | [v0.8 aff6883c83f3fd7e8268a9715e84266c42e2efe3](https://github.com/stevenlovegrove/Pangolin/tree/aff6883c83f3fd7e8268a9715e84266c42e2efe3) |
 
-Точні Linux-пакети — `scripts/cv/ubuntu-packages.tsv`, Python-пакети native venv — `scripts/cv/requirements.lock`. Великі вихідники, build, datasets і runs лежать у `/home/demus/.local/share/monotrajectoryweb`; основний репозиторій не переносився й не дублювався. Docker, PostgreSQL, Nginx і вебчастина не запускалися.
+Точні Linux-пакети — `scripts/cv/ubuntu-packages.tsv`, Python-пакети native venv — `scripts/cv/requirements.lock`. Великі вихідники, build, datasets і runs лежать у `/home/demus/.local/share/monotrajectoryweb`; основний репозиторій не переносився й не дублювався. У межах Промпта 2 Docker, PostgreSQL, Nginx і вебчастина не запускалися; нативні БД/API/Nginx додані окремо у Промпті 3.
 
 ## Вхід і калібрування
 
@@ -107,6 +107,6 @@ wsl -d Ubuntu --exec bash scripts/cv/setup-python-wsl.sh
 
 Конвенція — `Twc = inverse(Tcw)`, quaternion у порядку xyzw. Невалідні/недоступні пози позначені `null`; різні карти/сегменти та прогалини не з’єднуються на графіку. Перевірено лише одну реальну карту/сегмент, не всі reset/multi-map сценарії. П’ять stdlib unittest-перевірок point metadata/truncation пройшли у native venv; реальний final-масив у цьому запуску не обрізався.
 
-Усі вихідні кадри мають записи, але final-пози є явно облікованою підмножиною через недоступні reference та невалідні live-пози. R1–R8 вебзастосунку залишаються запланованими; завантаження відеофайла, БД/API/UI та балансування належать наступним окремо дозволеним етапам.
+Усі вихідні кадри мають записи, але final-пози є явно облікованою підмножиною через недоступні reference та невалідні live-пози. На момент завершення Промпта 2 R1–R8 були заплановані. Після окремо дозволеного Промпта 3 відеовхід, БД/API та нативні compute додані; актуальні часткові статуси — у [requirements.md](requirements.md). UI та паралельне балансування ще заплановані.
 
 Push не виконувався.
