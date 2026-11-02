@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname -- "$0")/ui-env"
+"$MTW_PY" -c 'from mtw.capacity import ensure_space; ensure_space()'
+test -x "$UI_DEPS/node_modules/.bin/vite" || { echo 'Run bash scripts/setup-ui first.' >&2; exit 1; }
+mkdir -p -- "$UI_WORK"
+export MTW_UI_REPO="$UI_REPO"
+export MTW_UI_WORK="$UI_WORK"
+"$MTW_PY" - <<'PY'
+import json, os
+from pathlib import Path
+repo = Path(os.environ['MTW_UI_REPO'])
+modules = Path(os.environ['MTW_UI_MODULES'])
+paths = {}
+for name in ('react', 'react-dom', 'three'):
+    paths[name] = [str(modules / '@types' / name / 'index.d.ts')]
+    paths[name + '/*'] = [str(modules / '@types' / name / '*')]
+config = {'extends': str(repo / 'frontend/tsconfig.json'),
+          'compilerOptions': {'paths': paths, 'types': ['react', 'react-dom'],
+                              'typeRoots': [str(modules / '@types')]}}
+(Path(os.environ['MTW_UI_WORK']) / 'tsconfig.json').write_text(json.dumps(config), encoding='utf-8')
+PY
+"$UI_DEPS/node_modules/.bin/tsc" --project "$UI_WORK/tsconfig.json"
+node --experimental-strip-types "$UI_REPO/frontend/tests/data.test.ts"
+"$UI_DEPS/node_modules/.bin/vite" build --config "$UI_REPO/frontend/vite.config.mjs" --configLoader native

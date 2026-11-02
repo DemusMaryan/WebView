@@ -1,5 +1,6 @@
 scripts/** text eol=lf
 backend/** text eol=lf
+frontend/** text eol=lf
 config/** text eol=lf
 native/** text eol=lf
 patches/** text eol=lf

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+UI_REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+MTW_PY="${MTW_VENV_ROOT:-$HOME/.local/share/monotrajectoryweb/web-venv}/bin/python"
+export PYTHONPATH="$UI_REPO/backend"
+UI_NATIVE="$("$MTW_PY" -c 'from mtw.config import CV_ROOT; print(CV_ROOT)')"
+UI_DIST="$("$MTW_PY" -c 'from mtw.config import DATA; print(DATA / "ui")')"
+UI_DEPS="$UI_NATIVE/frontend-deps"
+UI_WORK="$UI_NATIVE/frontend-work"
+UI_NODE="$UI_NATIVE/tools/node-v24.22.2-linux-x64"
+export PATH="$UI_NODE/bin:$PATH"
+export MTW_UI_MODULES="$UI_DEPS/node_modules"
+export MTW_UI_CACHE="$UI_WORK/vite-cache"
+export MTW_UI_DIST="$UI_DIST"

@@ -114,6 +114,8 @@ pid "{prefix}/nginx.pid";
 error_log "{DATA}/logs/nginx-error.log";
 events {{ worker_connections 128; }}
 http {{
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
     client_body_temp_path "{prefix}/client_temp";
     proxy_temp_path "{prefix}/proxy_temp";
     log_format project '$time_iso8601 $request $status upstream=$upstream_addr';
@@ -125,10 +127,18 @@ http {{
     }}
     server {{
         listen 127.0.0.1:{PORTS['entry']};
-        location / {{
+        location /api/ {{
             proxy_pass http://127.0.0.1:{PORTS['api']};
             proxy_read_timeout 30s;
             proxy_request_buffering off;
+        }}
+        location = /health {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
+        location = /openapi.json {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
+        location = /docs {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
+        location / {{
+            root "{DATA}/ui";
+            try_files $uri $uri/ /index.html;
+            add_header Cache-Control "no-cache";
         }}
     }}
     server {{
@@ -143,6 +153,9 @@ http {{
 '''
     (prefix / "nginx.conf").write_text(config, encoding="utf-8")
     command(["nginx", "-t", "-p", str(prefix) + "/", "-c", "nginx.conf"], stdout=subprocess.DEVNULL)
+    master = owned("nginx")
+    if master:
+        os.kill(master["pid"], signal.SIGHUP)
 
 
 def launch(name):
