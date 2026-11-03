@@ -70,7 +70,7 @@ def identity(token):
             return None
         user = session.get(User, record.user_id) if record.user_id else None
         return {"token_hash": digest, "user": user_value(user) if user else None,
-                "csrf_token": csrf_token(token)}
+                "csrf_token": csrf_token(token), "remaining_seconds": max(1, int((record.expires_at - now()).total_seconds()))}
 
 
 def error(status, code, message):
@@ -87,6 +87,8 @@ class BrowserSecurity:
             return await self.app(scope, receive, send)
         request = Request(scope)
         try:
+            if SETTINGS["cookie_mode"] == "https" and request.url.scheme != "https":
+                raise error(400, "https_required", "Use the canonical HTTPS application URL")
             origin = request.headers.get("origin")
             if origin is not None and origin not in SETTINGS["allowed_origins"]:
                 raise error(403, "csrf_rejected", "Origin is not allowed")
@@ -153,6 +155,8 @@ def bootstrap(request: Request, response: Response):
     response.headers["Cache-Control"] = "no-store"
     current = request.state.auth
     if current:
+        # Upgrade an existing dev cookie to Secure without extending DB expiry.
+        set_cookie(response, request.cookies[COOKIE], current["remaining_seconds"])
         return {"user": current["user"], "csrf_token": current["csrf_token"]}
     with Session.begin() as session:
         return issue(session, request, response)

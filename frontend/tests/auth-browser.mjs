@@ -13,19 +13,28 @@ const fixture = JSON.parse(await fs.readFile(path.join(directory, 'credentials.j
 const fixtureSeed = await fs.readFile(path.join(directory, 'fixture-seed'));
 for (const user of Object.values(fixture.users)) user.password = createHmac('sha256', fixtureSeed).update(user.login).digest('hex');
 const base = fixture.base;
-assert.equal(base, 'http://127.0.0.1:8180');
+assert.equal(base, 'https://127.0.0.1:8444');
 const sensitive = new Set(Object.values(fixture.users).map(user => user.password));
 const clean = value => { let text = String(value); for (const secret of sensitive) text = text.replaceAll(secret, '[redacted]'); return text; };
 const { chromium } = await import(pathToFileURL(path.join(native, 'frontend-deps/node_modules/playwright-core/index.mjs')).href);
-const output = path.join(native, 'web/reports/prompt8-browser');
+const output = path.join(native, 'web/reports/prompt9-browser');
 await fs.mkdir(output, { recursive: true });
 const report = { started_at: new Date().toISOString(), base, passed: false, checks: {}, statuses: {},
   fixture_jobs: Object.fromEntries(Object.entries(fixture.users).map(([k,v]) => [k, { job_id: v.job_id, source_job_id: v.source_job_id }])),
-  errors: [], blocked: [], requests: [] };
+  errors: [], blocked: [], mixed_content: [], requests: [], ignoreHTTPSErrors: true };
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 report.browser = browser.version();
-const a = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'uk-UA' });
-const b = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'uk-UA' });
+const trustProbe = await browser.newContext({ ignoreHTTPSErrors: false });
+const trustPage = await trustProbe.newPage();
+try {
+  await trustPage.goto(base);
+  report.default_browser_trust = { trusted: true };
+} catch (error) {
+  report.default_browser_trust = { trusted: false, error: String(error.message).split('\n')[0] };
+}
+await trustProbe.close();
+const a = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'uk-UA', ignoreHTTPSErrors: true });
+const b = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'uk-UA', ignoreHTTPSErrors: true });
 for (const context of [a,b]) {
   await context.route('**/*', route => {
     if (new URL(route.request().url()).origin === base) return route.continue();
@@ -35,6 +44,7 @@ for (const context of [a,b]) {
 const pa = await a.newPage(), pb = await b.newPage();
 for (const page of [pa,pb]) {
   page.on('pageerror', error => report.errors.push(clean(error.message)));
+  page.on('console', message => { if (/mixed content/i.test(message.text())) report.mixed_content.push(clean(message.text())); });
   page.on('request', request => {
     if (request.url().startsWith(base + '/api/')) report.requests.push({ method: request.method(), path: new URL(request.url()).pathname });
   });
@@ -77,6 +87,13 @@ try {
     pb.locator('.history .job-link').filter({ hasText: fixture.users.b.job_id.slice(0,8) }).click(),
   ]);
   await Promise.all([result(pa,fixture.users.a),result(pb,fixture.users.b)]);
+  for (const page of [pa,pb]) {
+    const unsafe = await page.evaluate(() => [...document.querySelectorAll('script[src],link[href],img[src],a[href]')]
+      .map(element => element.getAttribute('src') ?? element.getAttribute('href'))
+      .filter(value => value && new URL(value, location.href).protocol === 'http:'));
+    assert.deepEqual(unsafe, []);
+    assert.ok((await page.locator('.frame-host img').getAttribute('src')).startsWith('blob:https://'));
+  }
   const resultRequests = report.requests.filter(r => r.path === `/api/jobs/${fixture.users.a.job_id}/result`).length;
   await pa.getByRole('button', { name: 'Наступна', exact: true }).click();
   await pa.waitForFunction(() => document.querySelector('.pagination')?.textContent?.includes('Сторінка 2 із 2')
@@ -116,10 +133,10 @@ try {
   report.checks.csrf_and_origin_enforced = true;
   const ca = (await a.cookies()).find(c=>c.name==='mtw_session'), cb = (await b.cookies()).find(c=>c.name==='mtw_session');
   sensitive.add(ca.value); sensitive.add(cb.value);
-  assert.ok(ca.httpOnly && cb.httpOnly && ca.sameSite === 'Strict' && cb.sameSite === 'Strict' && !ca.secure && !cb.secure);
+  assert.ok(ca.httpOnly && cb.httpOnly && ca.sameSite === 'Strict' && cb.sameSite === 'Strict' && ca.secure && cb.secure);
   assert.ok(ca.value !== cb.value);
   assert.equal(await pa.evaluate(() => document.cookie.includes('mtw_session')), false);
-  report.checks.independent_httponly_strict_dev_cookies = true;
+  report.checks.independent_secure_httponly_strict_cookies = true;
   await pa.getByRole('button', { name: 'Вийти', exact: true }).click();
   await pa.locator('.auth-card h1').waitFor();
   assert.equal((await a.request.get(base + '/api/jobs')).status(),401);
@@ -135,6 +152,8 @@ try {
   assert.equal((await a.request.get(`${base}/api/jobs/${fixture.legacy_job_id}`)).status(),404);
   report.checks.ui_registration_logout_and_no_automatic_legacy_assignment = true;
   assert.deepEqual(report.errors,[]); assert.deepEqual(report.blocked,[]);
+  assert.deepEqual(report.mixed_content,[]);
+  report.checks.no_mixed_content = true;
   assert.ok(report.requests.every(r => !r.path.includes('/execute')));
   report.passed = true;
 } catch (error) {

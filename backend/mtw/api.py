@@ -18,6 +18,7 @@ from .files import atomic_json, read_json
 from .capacity import ensure_space
 from .frame_work import POLICY, cleanup_decoded_frames
 from .auth import BrowserSecurity, router as auth_router
+from .proxy import TrustedTLSProxy
 
 app = FastAPI(title="MonoTrajectoryWeb local API", version="0.8.0")
 app.include_router(auth_router)
@@ -55,6 +56,7 @@ class UploadLimit:
 app.add_middleware(UploadLimit)
 app.add_middleware(BrowserSecurity)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+app.add_middleware(TrustedTLSProxy)
 
 
 def owner(request):

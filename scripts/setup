@@ -3,7 +3,8 @@ set -euo pipefail
 REPO="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 ROOT="${MTW_VENV_ROOT:-$HOME/.local/share/monotrajectoryweb/web-venv}"
 case "$ROOT" in /mnt/*|/) echo 'Use a native WSL venv directory.' >&2; exit 1;; esac
-command -v nginx >/dev/null
+test -x /usr/sbin/nginx || { echo 'Project Nginx requires /usr/sbin/nginx.' >&2; exit 1; }
+command -v openssl >/dev/null || { echo 'OpenSSL is required for local HTTPS certificates.' >&2; exit 1; }
 command -v ffmpeg >/dev/null
 test -x /usr/lib/postgresql/16/bin/initdb
 test -d "$ROOT" || python3 -m venv "$ROOT"

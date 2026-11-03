@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import secrets
 import signal
+import ssl
 import subprocess
 import sys
 import time
@@ -16,8 +17,11 @@ from .config import CONFIG_PATH, DATA, LIMITS, PORTS, REPO
 from .files import atomic_json, read_json
 from .processes import identity
 from .service_auth import ensure_service_key, service_headers
+from .proxy import ensure_proxy_key, proxy_key
+from . import tls
 
 PG_BIN = Path("/usr/lib/postgresql/16/bin")
+NGINX = Path("/usr/sbin/nginx")
 PGDATA = DATA / "pgdata"
 SOCKET = DATA / "pgsocket"
 NAMES = ("api", "compute-1", "compute-2", "nginx", "dispatcher")
@@ -71,6 +75,8 @@ def pg_start():
 
 
 def setup():
+    tls.setup()
+    ensure_proxy_key()
     ensure_service_key()
     import psycopg
     from psycopg import sql
@@ -106,8 +112,14 @@ def setup():
 
 
 def write_nginx():
+    tls.validate()  # Never render or reload an HTTP fallback for missing/invalid TLS.
+    origin = tls.canonical_origin()
+    authority = origin.removeprefix("https://")
+    certificates = tls.paths()
+    forwarding_key = proxy_key()
     prefix = DATA / "nginx"
     prefix.mkdir(exist_ok=True)
+    prefix.chmod(0o700)
     for name in ("client_temp", "proxy_temp"):
         (prefix / name).mkdir(exist_ok=True)
     # Config is private to the project; no /etc/nginx or system service changes.
@@ -123,6 +135,9 @@ http {{
     log_format project '$time_iso8601 $request $status job=$http_x_mtw_job '
                        'upstream=$upstream_addr server=$upstream_http_x_mtw_server';
     access_log "{DATA}/logs/nginx-access.log" project;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_tickets off;
     client_max_body_size {LIMITS['file_bytes'] + 65536};
     upstream computes {{
         server 127.0.0.1:{PORTS['compute_1']};
@@ -130,9 +145,22 @@ http {{
     }}
     server {{
         listen 127.0.0.1:{PORTS['entry']};
+        if ($request_method !~ ^(GET|HEAD)$) {{ return 426; }}
+        return 308 {origin}$request_uri;
+    }}
+    server {{
+        listen 127.0.0.1:{PORTS['https']} ssl;
+        server_name 127.0.0.1 localhost;
+        ssl_certificate "{certificates['server_cert']}";
+        ssl_certificate_key "{certificates['server_key']}";
+        if ($host !~ ^(127\\.0\\.0\\.1|localhost)$) {{ return 400; }}
+        if ($http_host != "{authority}") {{ return 308 {origin}$request_uri; }}
         location /api/ {{
             proxy_pass http://127.0.0.1:{PORTS['api']};
-            proxy_set_header Host $http_host;
+            proxy_set_header Host "{authority}";
+            proxy_set_header X-Forwarded-Host "{authority}";
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-MTW-Proxy-Key "{forwarding_key}";
             proxy_read_timeout 30s;
             proxy_request_buffering off;
         }}
@@ -161,8 +189,12 @@ http {{
     }}
 }}
 '''
-    (prefix / "nginx.conf").write_text(config, encoding="utf-8")
-    command(["nginx", "-t", "-p", str(prefix) + "/", "-c", "nginx.conf"], stdout=subprocess.DEVNULL)
+    candidate = prefix / "nginx.conf.candidate"
+    with open(candidate, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as target:
+        target.write(config)
+    candidate.chmod(0o600)  # Contains only the private forwarding key, never logged.
+    command([NGINX, "-t", "-p", str(prefix) + "/", "-c", candidate.name], stdout=subprocess.DEVNULL)
+    os.replace(candidate, prefix / "nginx.conf")
     master = owned("nginx")
     if master:
         os.kill(master["pid"], signal.SIGHUP)
@@ -188,7 +220,7 @@ def launch(name):
     env["PYTHONUNBUFFERED"] = "1"
     if name == "nginx":
         prefix = DATA / "nginx"
-        argv = ["nginx", "-p", str(prefix) + "/", "-c", "nginx.conf", "-g", "daemon off;"]
+        argv = [str(NGINX), "-p", str(prefix) + "/", "-c", "nginx.conf", "-g", "daemon off;"]
         marker = str(prefix)
     elif name == "dispatcher":
         argv = [sys.executable, "-m", "mtw.dispatcher"]
@@ -224,6 +256,8 @@ def wait_health(port):
 
 
 def start(names):
+    tls.validate()
+    ensure_proxy_key()
     ensure_service_key()
     pg_start()
     write_nginx()
@@ -284,6 +318,13 @@ def status():
             pass
         except (OSError, RuntimeError):
             result["services"][name]["health_error"] = "Private service credential unavailable; run scripts/start"
+    try:
+        result["https"] = tls.validate()
+        context = ssl.create_default_context(cafile=tls.paths()["ca_cert"])
+        response = httpx.get(tls.canonical_origin() + "/health", verify=context, timeout=2, trust_env=False)
+        result["https"]["listener_verified"] = response.status_code == 200
+    except (ValueError, OSError, httpx.HTTPError) as error:
+        result["https"] = {"valid": False, "error": str(error), "http_fallback": False}
     print(json.dumps(result, indent=2))
 
 
@@ -312,4 +353,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit("Local service configuration error: " + str(error)) from None

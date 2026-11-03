@@ -55,7 +55,7 @@ export function AuthGate({ children }: { children: (user: User, logout: () => Pr
     }}>
       <label htmlFor="login">Логін</label><input id="login" value={login} onChange={e => setLogin(e.target.value)} required minLength={3} maxLength={32} autoComplete="username" />
       <label htmlFor="password">Пароль</label><input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={12} maxLength={128} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
-      <p className="hint">Логін: 3–32 символи a–z, 0–9, _, . або -. Пароль: 12–128 символів. HTTP лише для localhost; HTTPS — наступний етап.</p>
+      <p className="hint">Логін: 3–32 символи a–z, 0–9, _, . або -. Пароль: 12–128 символів. Локальний застосунок працює через HTTPS.</p>
       {error && <p className="error" role="alert">{error}</p>}
       <button className="primary" disabled={!session || busy}>{busy ? 'Обробка…' : mode === 'login' ? 'Увійти' : 'Зареєструватися'}</button>
     </form>

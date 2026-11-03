@@ -14,6 +14,7 @@ import secrets
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -32,14 +33,14 @@ from mtw.processes import identity
 
 def prepare():
     ensure_space()
-    for port in (8180, 8200):
+    for port in (8180, 8181, 8200, 8444):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", port))  # Fail without touching any existing listener.
     suffix = uuid4().hex
     root = DATA / "reports" / ("auth-browser-" + suffix)
     root.mkdir(mode=0o700)
     schema = "mtw_browser_" + suffix
-    control = {"root": str(root), "schema": schema, "processes": [], "base": "http://127.0.0.1:8180"}
+    control = {"root": str(root), "schema": schema, "processes": [], "base": "https://127.0.0.1:8444"}
     atomic_json(root / "control.json", control)
     try:
         return prepare_environment(root, schema, control)
@@ -58,7 +59,9 @@ def prepare_environment(root, schema, control):
     (root / "database-url").chmod(0o600)
     config = CONFIG_PATH.read_text().replace(f'data_root = "{CONFIG["paths"]["data_root"]}"', f'data_root = "{root}"')
     config = config.replace('api = 8000', 'api = 8200').replace('entry = 8080', 'entry = 8180')
-    config = config.replace('"http://127.0.0.1:8080", "http://localhost:8080"', '"http://127.0.0.1:8180", "http://localhost:8180"')
+    config = config.replace('https = 8443', 'https = 8444').replace('balancer = 8081', 'balancer = 8181')
+    config = config.replace('compute_1 = 8101', 'compute_1 = 8211').replace('compute_2 = 8102', 'compute_2 = 8212')
+    config = config.replace('https://127.0.0.1:8443', 'https://127.0.0.1:8444')
     (root / "config.toml").write_text(config)
     env = os.environ | {"MTW_CONFIG": str(root / "config.toml"), "PYTHONPATH": str(REPO / "backend")}
     subprocess.run([sys.executable, "-m", "alembic", "-c", str(REPO / "backend/alembic.ini"), "upgrade", "head"],
@@ -120,22 +123,15 @@ def prepare_environment(root, schema, control):
     engine.dispose()
     (root / "credentials.json").write_text(json.dumps(credentials))
     (root / "credentials.json").chmod(0o600)
+    (root / "tls").mkdir(mode=0o700)
+    for name in ("ca.crt.pem", "server.crt.pem", "server.key.pem"):
+        os.link(DATA / "tls" / name, root / "tls" / name)
+    (root / "ui").symlink_to(DATA / "ui", target_is_directory=True)
+    subprocess.run([sys.executable, "-c", "from mtw.proxy import ensure_proxy_key; ensure_proxy_key(); from mtw.control import write_nginx; write_nginx()"],
+                   env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     nginx = root / "nginx"
-    nginx.mkdir()
-    (nginx / "nginx.conf").write_text(f'''pid "{nginx}/nginx.pid";
-error_log "{root}/nginx-error.log";
-events {{ worker_connections 64; }}
-http {{
- include /etc/nginx/mime.types;
- access_log "{root}/nginx-access.log";
- server {{ listen 127.0.0.1:8180;
-  location /api/ {{ proxy_pass http://127.0.0.1:8200; }}
-  location / {{ root "{DATA}/ui"; try_files $uri $uri/ /index.html; add_header Cache-Control "no-store"; }}
- }}
-}}
-''')
     commands = [([sys.executable, "-m", "uvicorn", "mtw.api:app", "--host", "127.0.0.1", "--port", "8200", "--no-access-log", "--no-proxy-headers"], "8200"),
-                (["nginx", "-p", str(nginx) + "/", "-c", "nginx.conf", "-g", "daemon off;"], str(nginx))]
+                (["/usr/sbin/nginx", "-p", str(nginx) + "/", "-c", "nginx.conf", "-g", "daemon off;"], str(nginx))]
     for argv, marker in commands:
         with (root / ("api.log" if marker == "8200" else "nginx.log")).open("wb") as log:
             child = subprocess.Popen(argv, env=env, cwd=REPO, stdout=log, stderr=subprocess.STDOUT,
@@ -154,7 +150,7 @@ http {{
         atomic_json(root / "control.json", control)
     for _ in range(100):
         try:
-            r = httpx.get(control["base"] + "/api/auth/session", timeout=1, trust_env=False)
+            r = httpx.get(control["base"] + "/health", verify=ssl.create_default_context(cafile=root / "tls/ca.crt.pem"), timeout=1, trust_env=False)
             if r.status_code == 200:
                 print(json.dumps({"root": str(root), "schema": schema, "base": control["base"], "jobs": 23}))
                 return

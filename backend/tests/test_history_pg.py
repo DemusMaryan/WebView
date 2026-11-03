@@ -67,10 +67,10 @@ class HistoryPostgresTests(unittest.TestCase):
             s.flush()
             self.user_id = user.id
             s.add(AuthSession(token_hash=auth.token_hash(token), user_id=user.id, expires_at=now() + timedelta(hours=1)))
-        self.headers = {"Cookie": f"{auth.COOKIE}={token}", "Origin": "http://127.0.0.1:8080", "X-CSRF-Token": auth.csrf_token(token)}
+        self.headers = {"Cookie": f"{auth.COOKIE}={token}", "Origin": "https://127.0.0.1:8443", "X-CSRF-Token": auth.csrf_token(token)}
 
     async def request_async(self, method, path, **kwargs):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1:8080", headers=self.headers) as c:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="https://127.0.0.1:8443", headers=self.headers) as c:
             return await c.request(method, path, **kwargs)
 
     def request(self, method, path, **kwargs):

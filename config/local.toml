@@ -1,4 +1,4 @@
-# Native WSL only. HTTP cookies are explicitly development-only on loopback.
+# Native WSL only. User traffic is HTTPS; HTTP only redirects GET/HEAD.
 [paths]
 cv_root = "~/.local/share/monotrajectoryweb"
 data_root = "~/.local/share/monotrajectoryweb/web"
@@ -7,6 +7,7 @@ data_root = "~/.local/share/monotrajectoryweb/web"
 postgres = 55432
 api = 8000
 entry = 8080
+https = 8443
 balancer = 8081
 compute_1 = 8101
 compute_2 = 8102
@@ -31,7 +32,11 @@ native_reserve_bytes = 2147483648
 backing_reserve_bytes = 5368709120
 
 [auth]
-cookie_mode = "localhost-http"
-allowed_origins = ["http://127.0.0.1:8080", "http://localhost:8080"]
+cookie_mode = "https"
+allowed_origins = ["https://127.0.0.1:8443"]
 session_seconds = 28800
 preauth_seconds = 600
+
+[tls]
+canonical_origin = "https://127.0.0.1:8443"
+trusted_proxy_addresses = ["127.0.0.1"]

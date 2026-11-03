@@ -64,7 +64,7 @@ class AuthenticationPostgresTests(unittest.TestCase):
 
     def client(self, **kwargs):
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app),
-            base_url="http://127.0.0.1:8080", headers={"Origin": "http://127.0.0.1:8080"}, **kwargs)
+            base_url="https://127.0.0.1:8443", headers={"Origin": "https://127.0.0.1:8443"}, **kwargs)
 
     async def bootstrap(self, client):
         response = await client.get("/api/auth/session")
@@ -106,7 +106,7 @@ class AuthenticationPostgresTests(unittest.TestCase):
                 old_cookie = client.cookies.get(auth.COOKIE)
                 self.assertTrue("httponly" in anon.headers["set-cookie"].lower())
                 self.assertTrue("samesite=strict" in anon.headers["set-cookie"].lower())
-                self.assertFalse("; secure" in anon.headers["set-cookie"].lower())
+                self.assertTrue("; secure" in anon.headers["set-cookie"].lower())
                 user = await self.register(client, "Account_A")
                 self.assertEqual(user["login"], "account_a")
                 token = client.cookies.get(auth.COOKIE)
@@ -210,7 +210,7 @@ class AuthenticationPostgresTests(unittest.TestCase):
                     self.assertEqual((await client.post("/api/auth/register", json=payload, headers=headers)).status_code, 403)
                 client.headers.pop("Origin")
                 self.assertEqual((await client.post("/api/auth/register", json=payload)).status_code, 403)
-                client.headers["Origin"] = "http://127.0.0.1:8080"
+                client.headers["Origin"] = "https://127.0.0.1:8443"
                 invalid = await client.post("/api/auth/register", json=payload | {"owner_id": "forbidden"})
                 self.assertEqual(invalid.status_code, 422)
                 self.assertTrue(self.password not in invalid.text)
@@ -258,14 +258,14 @@ class AuthenticationPostgresTests(unittest.TestCase):
     def test_https_mode_always_secure_and_rejects_http_bootstrap(self):
         auth.validate_settings(auth.SETTINGS)
         with self.assertRaises(ValueError):
-            auth.validate_settings(auth.SETTINGS | {"cookie_mode": "https"})
-        with patch.dict(auth.SETTINGS, cookie_mode="https", allowed_origins=["https://127.0.0.1:8080"]):
+            auth.validate_settings(auth.SETTINGS | {"cookie_mode": "https", "allowed_origins": ["http://127.0.0.1:8080"]})
+        with patch.dict(auth.SETTINGS, cookie_mode="https", allowed_origins=["https://127.0.0.1:8443"]):
             async def run():
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="https://127.0.0.1:8080") as c:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="https://127.0.0.1:8443") as c:
                     response = await c.get("/api/auth/session")
                     self.assertEqual(response.status_code, 200)
                     self.assertTrue("; secure" in response.headers["set-cookie"].lower())
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1:8080") as c:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1:8000") as c:
                     self.assertEqual((await c.get("/api/auth/session")).status_code, 400)
             asyncio.run(run())
 
@@ -399,6 +399,45 @@ class AuthenticationPostgresTests(unittest.TestCase):
             assert schema.startswith("mtw_migration_") and len(schema) == 46
             with self.admin.begin() as c:
                 c.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+
+    def test_http_and_spoofed_forwarding_rejected_trusted_proxy_accepted(self):
+        from mtw import proxy
+        key = secrets.token_hex(32)
+        async def run():
+            async with self.client() as browser:
+                user = await self.register(browser, "tls_owner")
+                cookie = browser.cookies.get(auth.COOKIE)
+                headers = {"Origin": "https://127.0.0.1:8443", "Cookie": f"{auth.COOKIE}={cookie}",
+                           "Host": "127.0.0.1:8443", "X-Forwarded-Host": "127.0.0.1:8443", "X-Forwarded-Proto": "https"}
+                for peer in ("127.0.0.1", "192.0.2.10"):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app, client=(peer, 12345)),
+                                                 base_url="http://127.0.0.1:8000") as client:
+                        self.assertEqual((await client.get("/api/auth/me", headers=headers)).status_code, 400)
+                        self.assertEqual((await client.get("/api/auth/me", headers=headers | {"X-MTW-Proxy-Key": "wrong"})).status_code, 400)
+                        accepted = await client.get("/api/auth/me", headers=headers | {"X-MTW-Proxy-Key": key})
+                        self.assertEqual(accepted.status_code, 200 if peer == "127.0.0.1" else 400)
+                        if peer == "127.0.0.1":
+                            self.assertEqual(accepted.json()["id"], user["id"])
+                self.assertEqual((await browser.get("/api/auth/me")).status_code, 200)
+        with patch.object(proxy, "proxy_key", return_value=key):
+            asyncio.run(run())
+
+    def test_existing_cookie_upgraded_to_secure_without_extending_session(self):
+        async def run():
+            async with self.client() as client:
+                await self.register(client, "upgrade_cookie")
+                token = client.cookies.get(auth.COOKIE)
+                with self.sessions() as s:
+                    expires = s.get(AuthSession, auth.token_hash(token)).expires_at
+                client.cookies.clear()
+                client.cookies.set(auth.COOKIE, token, domain="127.0.0.1", path="/")
+                response = await client.get("/api/auth/session")
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue("; secure" in response.headers["set-cookie"].lower())
+                self.assertTrue(client.cookies.get(auth.COOKIE) == token)
+                with self.sessions() as s:
+                    self.assertEqual(s.get(AuthSession, auth.token_hash(token)).expires_at, expires)
+        asyncio.run(run())
 
 
 if __name__ == "__main__":

@@ -12,4 +12,4 @@ elif name in ("compute-1", "compute-2"):
 else:
     raise SystemExit("Unknown service")
 uvicorn.run(target, host="127.0.0.1", port=port, workers=1, access_log=False,
-            timeout_graceful_shutdown=5)
+            proxy_headers=False, timeout_graceful_shutdown=5)
