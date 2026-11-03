@@ -1,6 +1,18 @@
 # Поточний локальний API: задачі та історія
 
-Контракт Промпта 7, перевірено 03.11.2026. Вхід через Nginx: `http://127.0.0.1:8080`. Усі адреси нижче відносні. Прототип локальний; автентифікація, власність і персональні квоти ще заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт.
+Контракт Промптів 7–8, перевірено 03.11.2026. Вхід через Nginx: `http://127.0.0.1:8080`. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions і власність реалізовані; HTTPS та персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Налаштування, CLI та докази авторизації](authentication.md).
+
+## Авторизація
+
+| Запит | Контракт |
+| --- | --- |
+| `GET /api/auth/session` | Bootstrap: user або null, csrf_token; HttpOnly-cookie. За потреби коротка анонімна сесія для CSRF login/register |
+| `POST /api/auth/register` | JSON login/password, 201 з user/csrf_token та новим cookie; 409 login_unavailable |
+| `POST /api/auth/login` | JSON login/password, 200 з user/csrf_token та новим cookie; 401 invalid_credentials |
+| `GET /api/auth/me` | Поточні id/login, 401 без чинної авторизованої сесії |
+| `POST /api/auth/logout` | 204, відкликання серверної сесії й видалення cookie |
+
+Bootstrap доступний без входу, jobs/config та всі їхні підмаршрути потребують входу. Без нього 401 `authentication_required`; чужий або unowned job — 404. Для всіх API mutations, включно з register/login/logout, потрібні Origin з `[auth].allowed_origins` та X-CSRF-Token з bootstrap/входу поточної сесії; порушення — 403 `csrf_rejected`. Не передавати секрети в URL. Cookies HttpOnly/SameSite=Strict; cookie_mode=localhost-http лише для dev loopback, https режим завжди Secure. Auth validation errors не повертають password/input. Файлові відповіді захищені тим самим owner check, private/no-store.
 
 ## Ліміти та створення
 
@@ -13,7 +25,7 @@ queued_jobs = 10
 
 `stored_jobs` — додатне ціле, глобальна кількість **усіх** записів у PostgreSQL, незалежно від стану. `queued_jobs` — окрема межа незавершених записів: queued, dispatching, running. Успішні, failed, cancelled і timed_out також витрачають stored quota. Конфігурацію API перечитує при старті; зміну ліміту застосовують перезапуском API. Ліміт не є політикою видалення й не гарантує обсяг медіа в байтах.
 
-`POST /api/jobs` приймає multipart `video` та текстове JSON-поле `parameters` із явним `calibration`. Успіх — `202`, метадані задачі, `id`, `status_url`; обчислення запускає dispatcher окремо. Відео й калібрування описані у [video-worker.md](video-worker.md). Попередні обмеження файлу/декодування/execution та дискові резерви збережені.
+`POST /api/jobs` приймає multipart `video` та текстове JSON-поле `parameters` із явним `calibration`, із чинною user session/CSRF. Успіх — `202`, метадані задачі, `id`, `status_url`; owner_id встановлюється із сесії, dispatcher запускає обчислення окремо. Клієнтський owner_id у parameters або зайвому form-полі відхиляється 422. Відео й калібрування описані у [video-worker.md](video-worker.md). Попередні обмеження файлу/декодування/execution та дискові резерви збережені.
 
 Якщо збережено `stored_jobs` або більше записів, відповідь `429`:
 
@@ -34,18 +46,18 @@ Upload передує admission: PostgreSQL transaction бере спільни�
 | `page` | 1 | ціле 1…2147483647 |
 | `page_size` | 20 | ціле 1…100 |
 
-Порядок: `created_at DESC, id DESC`. UUID — детермінований другий ключ, включно з однаковими timestamps. `total` та `items` одного запиту читаються в одній read-only REPEATABLE READ транзакції. Offset-пагінація гарантує відсутність пропусків/дублів на незмінному наборі; між різними запитами нові записи можуть зсунути сторінки. Довготривалої замороженої сесії історії немає.
+Порядок: `created_at DESC, id DESC`. UUID — детермінований другий ключ, включно з однаковими timestamps. **total/items містять тільки власні задачі поточного користувача**, без unowned. Ліміт admission глобальний, `stored_job_limit` не є персональною квотою. `total` та `items` одного запиту читаються в одній read-only REPEATABLE READ транзакції. Offset-пагінація гарантує відсутність пропусків/дублів на незмінному наборі; між різними запитами нові записи можуть зсунути сторінки. Довготривалої замороженої сесії історії немає.
 
-Відповідь `200` для поточних 51 задач:
+Відповідь `200` для нового облікового запису без задач (51 старий запис не призначається автоматично):
 
 ```json
 {
-  "items": ["метадані задач; тут скорочено"],
-  "total": 51,
+  "items": [],
+  "total": 0,
   "page": 1,
   "page_size": 20,
-  "total_pages": 3,
-  "has_next": true,
+  "total_pages": 0,
+  "has_next": false,
   "has_previous": false,
   "stored_job_limit": 100
 }
@@ -57,7 +69,7 @@ Upload передує admission: PostgreSQL transaction бере спільни�
 
 ```powershell
 curl.exe "http://127.0.0.1:8080/api/jobs?page=1&page_size=20"
-curl.exe "http://127.0.0.1:8080/api/jobs?page=3&page_size=20"
+# Без cookie тепер 401. Авторизовану історію перевіряй через UI або захищений cookie jar.
 ```
 
 ## Контракти перегляду й скасування
@@ -67,13 +79,16 @@ curl.exe "http://127.0.0.1:8080/api/jobs?page=3&page_size=20"
 | `GET /api/jobs/{id}` | Метадані задачі; 404 для відсутнього id |
 | `GET /api/jobs/{id}/snapshot` | Невеликий latest snapshot; null-пози/tracking/map/segment збережені; JSONL не сканується |
 | `GET /api/jobs/{id}/frames/{frame_id}` | Опублікований PNG, `X-Frame-Id`; 404, якщо preview недоступний |
+| `GET /api/jobs/{id}/video` | Вихідне input.video як attachment лише власнику |
 | `GET /api/jobs/{id}/result` | Manifest і URL артефактів; 409 до succeeded, 503 якщо файл manifest відсутній |
 | `GET /api/jobs/{id}/artifacts/{name}` | trajectory.json, map_points.json, snapshots.jsonl або native-summary.json для succeeded; великий вміст завантажується окремо |
 | `POST /api/jobs/{id}/cancel` | 202 з метаданими; terminal task не запускається повторно; для running запит обробляє compute |
 
-Ці маршрути та алгоритми CV у Промпті 7 не змінювалися. [R5 і cancel/timeout isolation](parallel-processing.md) залишаються окремими доказами.
+У Промпті 8 всі ці маршрути перевіряють власника; video додано як захищений attachment. На compute /execute і /health потрібен приватний X-MTW-Service-Key, також при прямому зверненні. Браузерна сесія його не замінює. Ключ не видається користувачам, dispatcher/control читають його з native файла 0600. [R5 і cancel/timeout isolation](parallel-processing.md) залишаються окремими доказами; CV не змінювався.
 
 ## Приймання Промпта 7
+
+Наведені нижче браузерні результати — історичне приймання до появи ownership. Старий history-browser не є анонімним smoke для поточного API. Актуальне приймання з двома користувачами, isolated schema й командами prepare/browser/cleanup — у [authentication.md](authentication.md). PostgreSQL admission/history регресії адаптовано до сесій і повторно пройдено в Промпті 8.
 
 Реальний PostgreSQL, одноразові схеми `mtw_history_<uuid>` / `mtw_test_<uuid>` з окремими тимчасовими файлами. Доступ до public jobs у цих HTTP-тестах замінено на isolated Session; decoder, dispatcher і SLAM тестами не запускаються. Після тестів схеми й власні тимчасові файли прибрані.
 
