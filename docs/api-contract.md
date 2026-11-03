@@ -1,6 +1,6 @@
 # Поточний локальний API: задачі та історія
 
-Контракт Промптів 7–9, перевірено 03.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність і TLS 1.2/1.3 реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Налаштування, CLI та докази авторизації](authentication.md), [TLS і ручна довіра CA](https.md).
+Контракт Промптів 7–10, перевірено 03.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність, TLS 1.2/1.3 і queue ETA реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Авторизація](authentication.md), [TLS і ручна довіра CA](https.md), [черга, ETA й докази](queue-eta.md).
 
 HTTP:8080 GET/HEAD повертає 308 на canonical HTTPS зі збереженням path/query; інші методи — 426 без проксіювання user API. Прямий HTTP `/api/*` на приватному API:8000 повертає 400 `https_required`, також із підробленим forwarding. Довіряємо forwarded headers тільки від налаштованого loopback proxy з приватним X-MTW-Proxy-Key; Uvicorn proxy_headers=False. Host/Origin — canonical IP та порт 8443; localhost:8443 має валідний SAN і перенаправляється на canonical URL. Немає CORS. Сертифікати поза Git; curl використовує явний `--cacert`, системну довіру не встановлено.
 
@@ -78,7 +78,7 @@ wsl -d Ubuntu --exec curl --cacert /home/demus/.local/share/monotrajectoryweb/we
 
 | Запит | Поведінка |
 | --- | --- |
-| `GET /api/jobs/{id}` | Метадані задачі; 404 для відсутнього id |
+| `GET /api/jobs/{id}` | Метадані власної задачі та актуальні queue_position/estimated_wait_seconds; чужий/відсутній/unowned id — 404 |
 | `GET /api/jobs/{id}/snapshot` | Невеликий latest snapshot; null-пози/tracking/map/segment збережені; JSONL не сканується |
 | `GET /api/jobs/{id}/frames/{frame_id}` | Опублікований PNG, `X-Frame-Id`; 404, якщо preview недоступний |
 | `GET /api/jobs/{id}/video` | Вихідне input.video як attachment лише власнику |
@@ -87,6 +87,22 @@ wsl -d Ubuntu --exec curl --cacert /home/demus/.local/share/monotrajectoryweb/we
 | `POST /api/jobs/{id}/cancel` | 202 з метаданими; terminal task не запускається повторно; для running запит обробляє compute |
 
 У Промпті 8 всі ці маршрути перевіряють власника; video додано як захищений attachment. На compute /execute і /health потрібен приватний X-MTW-Service-Key, також при прямому зверненні. Браузерна сесія його не замінює. Ключ не видається користувачам, dispatcher/control читають його з native файла 0600. [R5 і cancel/timeout isolation](parallel-processing.md) залишаються окремими доказами; CV не змінювався.
+
+## Позиція черги та ETA — Промпт 10
+
+`GET /api/jobs/{own_id}` для готової до запуску queued-задачі додає:
+
+```json
+{"status":"queued","queue_position":1,"estimated_wait_seconds":20.3}
+```
+
+Це фрагмент реальної відповіді для `2d27a4da-dd0f-42aa-b998-f976f4075da2`. queue_position — додатна глобальна позиція серед queued без cancel_requested, FIFO `created_at ASC, id ASC`. Dispatching/running/cancelled/terminal виключені. estimated_wait_seconds — приблизне число ≥0, округлене до 0,1 с; null, якщо невідомі характеристики/статистика та початкова оцінка вимкнена, або неможливо оцінити доступність слотів. Для неqueued обидва поля null. Чужі UUID/імена/власники не повертаються.
+
+GET status рахує оцінку зі snapshot PostgreSQL: до 30 успішних execution durations без queue time, кадри×пікселі, залишок активної роботи та два паралельні слоти з FIFO попередниками. `[queue].initial_seconds=45` — cold start на 360×640×480, значення 0 вимикає fallback. JSONL/великі артефакти для ETA не читаються. [Формула, випадки null, налаштування й точні обмеження](queue-eta.md).
+
+У POST/list/cancel ці нові поля теж є, але null: це metadata responses, актуальні значення потрібно брати з GET status. Старе `eta_seconds` залишається null для сумісності; його не використовувати як новий ETA. Pending cap 10 включає queued+dispatching+running, stored cap 100 — всі стани; коди відмови незмінні. Перевірки owner/session/CSRF/HTTPS поширюються на нові поля. Браузер опитує тільки відкриту активну задачу й показує «Приблизне очікування», не гарантію часу.
+
+Приймання: всі три реальні задачі succeeded з валідними JSONL/геометрією; третя чекала дві native роботи й почалася після звільнення слота, переживши restart dispatcher. Перевірені FIFO/ties/concurrency/cancel/cold-start/null/owner у isolated PostgreSQL. 51 попередня задача збережена; тепер 54. [UUID, точні часи, ресурси й результати](queue-eta.md).
 
 ## Приймання Промпта 7
 
