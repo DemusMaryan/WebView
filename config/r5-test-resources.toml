@@ -1,6 +1,11 @@
 # Initial reserves for this R5 control test, not product requirements.
-# Runtime emergency guards in local.toml are unchanged.
+# Product guards in local.toml are unchanged; emergency limits below stop this test pair.
 [initial_thresholds_bytes]
 C_free = 10737418240
 Windows_available_RAM = 1610612736
-commit_headroom = 4294967296
+commit_headroom = 2147483648
+
+[emergency_minimum_bytes]
+C_free = 5368709120
+Windows_available_RAM = 536870912
+commit_headroom = 1073741824
