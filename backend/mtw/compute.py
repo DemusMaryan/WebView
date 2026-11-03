@@ -218,6 +218,7 @@ async def run_job(job_id, budget):
                 job.result_ref = "result.json"
                 manifest = read_json(directory / "result.json")
                 job.processed_frames = job.total_frames = manifest["processed_frames"]
+                job.video_info = manifest["video"]  # Measured decode metadata replaces header hints.
         atomic_json(directory / "termination.json", {"status": status, "error": error,
                     "worker_pid": child.pid if child else None, "group_members_after": group_processes(child.pid) if child else [],
                     "execution_seconds": elapsed})

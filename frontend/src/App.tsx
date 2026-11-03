@@ -4,6 +4,7 @@ import { parseCalibration } from './data';
 import type { MapModel } from './MapView';
 import type { Config, Job, JobStatus } from './types';
 import { terminal } from './types';
+import { waitLabel } from './queue';
 import { useJob } from './useJob';
 import { useHistory } from './useHistory';
 import { AuthGate, type User } from './Auth';
@@ -157,6 +158,11 @@ function Workspace({ user, logout }: { user: User; logout: () => Promise<void> }
           : <>
             <section className="card job-summary"><div className="card-heading"><div><span className="eyebrow">ПОТОЧНА ЗАДАЧА</span><h1>{job ? labels[job.status] : error ? 'Стан недоступний' : 'Завантаження стану…'}</h1></div><button className="quiet" onClick={() => selected(null)}>Закрити перегляд</button></div>
               <code className="job-id">{id}</code>
+              {job?.status === 'queued' && <div className="queue-info" role="status">
+                <p>У черзі · Позиція: <strong>{job.queue_position ?? 'ще уточнюється'}</strong></p>
+                <p>Приблизне очікування: <strong>{waitLabel(job.estimated_wait_seconds)}</strong></p>
+                <p className="muted">Оцінка до початку обробки може змінюватися й не є гарантованим часом.</p>
+              </div>}
               {error ? <div className="error" role="alert"><p>{error}</p><p>Опитування зупинено. Останній показаний стан може бути застарілим.</p><button onClick={() => setRetry(value => value + 1)}>Поновити стан</button></div>
                 : <><p>{job ? stages[job.stage] ?? labels[job.status] : 'З’єднання з API'} {job?.server_id && <span className="server">{job.server_id}</span>}</p>
                   <progress max={total ?? 1} value={total ? processed : job && terminal(job.status) ? 0 : undefined} aria-label="Фактично оброблені кадри" />

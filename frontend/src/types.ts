@@ -13,6 +13,7 @@ export type Job = {
   id: string; status: JobStatus; stage: string; processed_frames: number; total_frames: number | null;
   server_id: string | null; error: string | null; cancel_requested: boolean;
   created_at: string; parameters: { calibration: Calibration; execution_seconds: number };
+  queue_position: number | null; estimated_wait_seconds: number | null;
 };
 export type JobPage = {
   items: Job[]; total: number; page: number; page_size: number; total_pages: number;

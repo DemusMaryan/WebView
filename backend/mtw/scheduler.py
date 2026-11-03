@@ -16,7 +16,7 @@ def reserve_next(session_factory=Session):
         if count >= MAX_ACTIVE:
             return None
         job = session.scalar(select(Job).where(Job.status == "queued", Job.cancel_requested.is_(False))
-                             .order_by(Job.created_at, Job.id).with_for_update(skip_locked=True).limit(1))
+                             .order_by(Job.created_at, Job.id).with_for_update().limit(1))
         if job is None:
             return None
         job.status = job.stage = "dispatching"

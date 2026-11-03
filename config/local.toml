@@ -40,3 +40,11 @@ preauth_seconds = 600
 [tls]
 canonical_origin = "https://127.0.0.1:8443"
 trusted_proxy_addresses = ["127.0.0.1"]
+
+[queue]
+# Estimated worker wall time (decode + native + export/cleanup), never queue time.
+initial_seconds = 45.0
+reference_frames = 360
+reference_width = 640
+reference_height = 480
+history_samples = 30

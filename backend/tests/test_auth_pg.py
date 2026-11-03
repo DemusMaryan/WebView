@@ -388,12 +388,16 @@ class AuthenticationPostgresTests(unittest.TestCase):
                 s.add(Job(parameters={}, input_ref="legacy", status="succeeded"))
             with migration_engine.connect() as c:
                 before = c.scalar(text("SELECT row_to_json(jobs) FROM jobs"))
-            migrate("head")
+            migrate("0003_authentication")
             with migration_engine.connect() as c:
                 self.assertEqual(c.scalar(text("SELECT row_to_json(jobs) FROM jobs")), before)
                 self.assertEqual(c.scalar(text("SELECT count(*) FROM users")), 0)
                 self.assertEqual(c.scalar(text("SELECT count(*) FROM auth_sessions")), 0)
                 self.assertEqual(c.scalar(text("SELECT version_num FROM alembic_version")), "0003_authentication")
+            migrate("head")
+            with migration_engine.connect() as c:
+                self.assertEqual(c.scalar(text("SELECT row_to_json(jobs) FROM jobs")), before | {"video_info": None})
+                self.assertEqual(c.scalar(text("SELECT version_num FROM alembic_version")), "0004_video_info")
         finally:
             migration_engine.dispose()
             assert schema.startswith("mtw_migration_") and len(schema) == 46

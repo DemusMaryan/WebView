@@ -57,6 +57,7 @@ class Job(Base):
     worker_pid: Mapped[int | None] = mapped_column(Integer)
     worker_start_ticks: Mapped[str | None] = mapped_column(String(32))
     execution_seconds: Mapped[float | None] = mapped_column(Float)
+    video_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 engine = create_engine(database_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
@@ -71,4 +72,5 @@ def serialize(job):
     return {key: (value.isoformat() if isinstance(value, datetime) else str(value) if isinstance(value, UUID) else value)
             for key, value in values.items()} | {
         "parameters": job.parameters, "has_result": job.result_ref is not None,
-        "has_snapshot": job.snapshot_ref is not None, "eta_seconds": None}
+        "has_snapshot": job.snapshot_ref is not None, "eta_seconds": None,
+        "queue_position": None, "estimated_wait_seconds": None}

@@ -19,6 +19,7 @@ from .capacity import ensure_space
 from .frame_work import POLICY, cleanup_decoded_frames
 from .auth import BrowserSecurity, router as auth_router
 from .proxy import TrustedTLSProxy
+from .queue_eta import estimate_queue, probe_video
 
 app = FastAPI(title="MonoTrajectoryWeb local API", version="0.8.0")
 app.include_router(auth_router)
@@ -115,6 +116,7 @@ async def create_job(request: Request, video: Annotated[UploadFile, File()], par
             raise HTTPException(422, "Empty video")
         (directory / "parameters.json").write_text(params.model_dump_json(), encoding="utf-8")
         atomic_json(directory / "frame-work-policy.json", POLICY)
+        video_info = await run_in_threadpool(probe_video, path)
         def persist():
             with Session.begin() as session:
                 # The count and insert share this transaction/lock, including
@@ -129,7 +131,7 @@ async def create_job(request: Request, video: Annotated[UploadFile, File()], par
                 if pending >= LIMITS["queued_jobs"]:
                     raise HTTPException(429, {"code": "pending_job_limit_reached",
                         "message": "Pending job limit reached", "limit": LIMITS["queued_jobs"], "count": pending})
-                job = Job(id=job_id, owner_id=owner(request), parameters=params.model_dump(), input_ref="input.video")
+                job = Job(id=job_id, owner_id=owner(request), parameters=params.model_dump(), input_ref="input.video", video_info=video_info)
                 session.add(job)
                 session.flush()
                 return serialize(job)
@@ -164,8 +166,10 @@ def list_jobs(request: Request, page: int = Query(1, ge=1, le=2147483647),
 
 @app.get("/api/jobs/{job_id}")
 def status(job_id: UUID, request: Request):
-    with Session() as session:
-        return serialize(get_job(session, job_id, request))
+    with Session.begin() as session:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        job = get_job(session, job_id, request)
+        return serialize(job) | estimate_queue(session, job)
 
 
 @app.get("/api/jobs/{job_id}/snapshot")
