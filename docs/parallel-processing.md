@@ -1,6 +1,65 @@
 # Промпт 6: паралельні обчислення через Nginx — R5
 
-**03.11.2026, повне приймання не завершено: повторний блокер — вільне місце C:. R5 залишається частковим.** У другій спробі дві паралельні задачі успішно завершилися, їхні результати незалежно перевірено через API. Ізоляція cancel/timeout у новій моделі ще не завершена: під час наступної пари backing guard знову зупинив прогін. Успіх основної пари й помилка решти suite розділені; passed=false повного suite не приховується.
+**03.11.2026, поточне приймання R5 не завершено.** У ранковій перевірці 60-секундний пасивний baseline зафіксував зменшення C: на 7,32 MiB при залишку понад 19 GiB. За поточною умовою користувача обчислення при падінні місця у простої не запускалися. Це не повторний storage-guard failure і не пояснення попереднього падіння на гігабайти. Докладні синхронні виміри — нижче. Попередні невдалі suite залишаються історичними матеріалами, а не прийманням нового запуску. R5 — частково; ізоляція cancel/timeout у двослотовій моделі ще не завершена.
+
+## Контрольований пасивний baseline, 03.11.2026
+
+Після перерваного сеансу попередній неповний baseline не використано: він містив лише 18 завершених записів. На початку поточної перевірки WSL уже мав новий сеанс роботи; старий Windows collector завершився. Агент не перезапускав WSL/Windows, не змінював системні параметри й не запускав SLAM. Нова перевірка — **10:38:55,760–10:39:56,455 Europe/Kyiv**, 61 WSL sample, 60,011 с загального monotonic wall. Різниця monotonic між першим і останнім вимірами — 59,999 с; UTC у WSL коригувався. Живих `mono_export` не було. Zombie PID явно відрізняються від живих процесів у скрипті спостереження.
+
+`scripts/resource-monitor-windows.py` — один довгоживучий Python-процес Windows, PID **12364**, інтервал 0,5 с. Він напряму викликає Win32 API через ctypes, без WMI, subprocess або PowerShell на кожен показник. Запуск виконано через `Start-Process -WindowStyle Hidden`; єдиний його дочірній процес у baseline — console host, PID 33552. Collector записав 264 samples від 10:38:43,984 до 10:40:55,482 Kyiv: до/під час/після baseline. Завершений через власний stop marker; stderr порожній. Зміни процесів інших засобів діагностики записуються окремими PID/PPID, не приписуються захисту.
+
+| Показник у 60-секундному baseline | Початок → кінець | Фактично спостережений діапазон / зміна |
+| --- | --- | --- |
+| C: free, WSL | 21 453 660 160 → 21 445 984 256 байтів | **19,98028 → 19,97313 GiB; −7 675 904 байти (−7,3203 MiB)** |
+| Pagefile, логічний розмір | 16 312 721 408 → 16 312 721 408 | без зміни; allocated недоступний, Win32 error 32, JSON null |
+| Ubuntu ext4.vhdx, логічний / allocated | 17 942 183 936 / 17 942 183 936 | обидва без зміни, 16,70996 GiB |
+| Три знайдені host swap.vhdx | кожний 37 748 736 байтів | кожний logical/allocated без зміни, по 36 MiB; належність активному `/dev/sdc` не встановлена |
+| Windows swapfile.sys, логічний | 16 777 216 → 16 777 216 | без зміни; allocated недоступний, error 32 |
+| Windows Available RAM | 665 456 640 → 1 021 329 408 | **523 509 760–1 033 715 712 байтів** (0,488–0,963 GiB) |
+| Windows committed memory | 29 079 003 136 → 28 683 522 048 | 28 666 802 176–29 264 687 104 (26,698–27,255 GiB) |
+| Windows commit limit | 32 625 442 816 → 32 625 442 816 | 30,385 GiB, без зміни |
+| Collector RSS / private | близько 17,3 / 10,8 MiB | RSS 18 124 800–18 186 240; private 11 313 152–11 423 744 байти |
+| PowerShell / pwsh, усі видимі процеси | 1 / 0 → 1 / 0 | максимум 2 / 0 через короткі команди перевірки; накопичення не зафіксовано |
+
+У межах усього 132-секундного Windows запису C: зменшився на 17 682 432 байти (16,863 MiB), мінімум 21 427 216 384 байти. Available RAM мінімум той самий; максимум committed — 29 343 277 056 байтів. Це **виміряні samples**, не приховані апаратні піки між ними. Collector витратив 6,109 CPU-секунди за 132,001 с; максимально один sample займав 0,0572 с. Розміри діагностичних журналів невеликі, але сам запис не є абсолютно нульовим I/O. Повне джерело фонового зменшення C: не встановлено. Незмінні виміряні великі файли не пояснюють його; дані не доводять провину pagefile, VHDX, проєкту або захисту. Нових job/decoded-кадрів не створено; 41 наявний каталог задач збережено.
+
+### Перевірка C: guard
+
+- Поточна конфігурація: native reserve 2 GiB, backing mount `/mnt/c`, backing reserve **5 × 1024³ = 5 368 709 120 байтів**. Mount — Windows `C:\\`, не Linux root чи інший диск.
+- `backend/mtw/capacity.py` викликає Linux `shutil.disk_usage`, тобто `os.statvfs`; free = `f_bavail × f_frsize` у байтах. Текстової Windows-відповіді або розбору локалізованих чисел немає. Перевірено також граничний випадок «рівно reserve» / «reserve − 1 байт».
+- Guard викликається перед decode й на кожен decoded frame, приблизно кожні 0,1 с у кожному активному compute manager та на upload chunks API (1 MiB). За одночасного decode двох 30-fps відео це приблизно 60 frame-перевірок/с плюс близько 20 manager-перевірок/с. Це звернення до файлової системи, **не 80 запусків PowerShell/с**; фактичний темп decode може відрізнятися від fps.
+- 100 реальних `ensure_space()` викликів у WSL: 0 зафіксованих `subprocess.Popen/os.system/os.posix_spawn`, середня тривалість 0,334 мс, максимальна 0,887 мс. Самі scripts спостереження також не імпортують subprocess. Це разом із переглядом коду не виявило Windows helper на один вимір.
+- `OSError`/`TimeoutError` не перетворюються на нуль або успіх, а поширюються. Compute exception handler завершує власну групу процесів. API перетворює low-space ValueError на 507; інша помилка вимірювання може дати 500, upload cleanup збережено. **Власного тайм-ауту навколо statvfs немає**: завислий системний виклик міг би затримати цей guard/manager; фактичного такого зависання не зафіксовано. Інжектований TimeoutError у тесті підтверджує лише поширення вже отриманої помилки, не існування таймера.
+- Windows `GetDiskFreeSpaceExW` звірено з незалежним `GetDiskFreeSpaceW` (кластери × сектори × байти): у 121 sample baseline різниця **0 байтів**. WSL і останній асинхронний Windows sample відрізнялися максимум на 831 488 байтів; Windows sample мав вік до 0,976 с. Це не синхронні системні виклики, відмінність не видається за помилку одиниць.
+- Collector використовує `GetPerformanceInfo`, Toolhelp process enumeration та `GetProcessMemoryInfo`; незчитані значення — null з error code. Захищений wslservice мав error 5, його пам'ять не підставлена нулем. Монітор RSS не зростав від початку до кінця baseline. Зростання кількості PowerShell/дочірніх процесів як причину попереднього провалу **не доведено**.
+
+Цільові тести guard: **2 passed, 0,002 с**, без CV або job. Після уточнення обробки помилки enumeration collector додатково пройшов self-check: один процес, 3 samples за 1,5 с, усі disk/memory/process API успішні, два disk API рівні, процес завершився. Це не другий baseline і не обчислювальна спроба. Observer помічає недоступний повторний statvfs як null/error, а zombie окремо; початковий успішний шлях підтверджений повним baseline.
+
+### Відтворення й артефакти
+
+Запущений у Windows collector (шляхи наведені через змінні, без зміни системи):
+
+```powershell
+# $diag — новий локальний каталог diagnostics; $vhdxPath — фактичний наявний Ubuntu ext4.vhdx.
+$monitorScript = Join-Path (Get-Location) 'scripts\resource-monitor-windows.py'
+$arguments = '"' + $monitorScript + '" --output "' + $diag + '\windows.jsonl" --vhdx "' + $vhdxPath + '" --stop-file "' + $diag + '\stop" --seconds 1800 --interval 0.5'
+Start-Process (Get-Command python.exe).Source -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput ($diag + '\exit.json') -RedirectStandardError ($diag + '\error.txt')
+```
+
+WSL baseline читає context JSON з `windows_log` (Windows path), що створений після запуску collector. Імена output мають бути новими; скрипти не перезаписують наявні JSONL.
+
+```powershell
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python scripts/resource-baseline-wsl.py --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-baseline-20261103-morning.jsonl
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python -m unittest discover -s backend/tests -p test_capacity.py -v
+```
+
+Raw Windows: `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T083843Z\windows.jsonl`; там само `exit.json`, порожній `error.txt`, `selfcheck.jsonl`. Native reports: `monitored-r5-baseline-20261103-morning.jsonl`, `monitored-r5-guard-review-20261103.json`, `monitored-r5-20261103-summary.json`, `monitored-r5-postcheck-20261103.json`. Останній підтвердив 36/36 старих signatures із попереднього evidence, 41 наявний job-каталог, 0 нових jobs, 0 native-процесів, незмінні п'ять хешів CV/exporter/dependencies; C: 21 400 764 416 байтів. Журнали залишаються поза Git. Обидва collectors завершені, нічого не видалено.
+
+### Рішення перед обчисленням
+
+Залишок понад 10 GiB і 5-GiB reserve не порушений. Однак у простої є невелика від'ємна зміна, тому виконано умову користувача **не запускати обчислення при падінні C: вже у baseline**. Це консервативний стоп за поточним правилом, а не доказ аварійної тенденції; відхилення 7,32 MiB не ототожнюється з попередньою втратою близько 12 GiB. Нових HTTP POST job, фрагментів відео, SLAM-прогонів, Nginx handoff, PID tracking або R5 результатів у цій перевірці немає. CV/dependencies/ABI/shutdown і системні налаштування не змінено, залежності не перебудовано.
+
+Наступна перевірка: спершу визначити допустимий фоновий шум baseline (поточна умова не задає допуску) й отримати придатний 60-секундний запис при C: ≥10 GiB. Лише після проходження gate — одна пара фрагментів **[0,10) / [0,12)** наявного контрольного відео, очікувано 300/360 кадрів при 30 fps, 640×480, без resize й зі збереженим явним TUM calibration. Перевірити PTS i/30 та кількість після підготовки; це ще не виконано. Collector має працювати до/під час/після єдиної пари; WSL sampler — PID/start ticks, CPU ticks, RSS, tracking/snapshot progress. Результати/JSONL перевіряються для фактичних 300/360 кадрів, а не hardcoded 798 старого suite. При провалі зупинити тільки нові jobs, зберегти after-window й не повторювати автоматично. Скорочення відео не гарантує меншого RAM.
 
 ## Реалізація
 
