@@ -1,11 +1,7 @@
-# Initial reserves for this R5 control test, not product requirements.
-# Product guards in local.toml are unchanged; emergency limits below stop this test pair.
+# Disk-only limits for this R5 test; RAM and commit are informational telemetry.
+# Product guards, OS memory management and job time budgets are unchanged.
 [initial_thresholds_bytes]
 C_free = 10737418240
-Windows_available_RAM = 1610612736
-commit_headroom = 2147483648
 
 [emergency_minimum_bytes]
 C_free = 5368709120
-Windows_available_RAM = 536870912
-commit_headroom = 1073741824

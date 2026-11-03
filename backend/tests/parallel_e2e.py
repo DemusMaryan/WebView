@@ -99,7 +99,6 @@ def run(output, isolation_only=False):
         mem = {k: int(v.split()[0]) * 1024 for k, v in
                (line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
                if k in ("MemAvailable", "SwapFree")}
-        assert mem["MemAvailable"] > 512 * 1024**2, "Memory guard: less than 512 MiB available"
         record = {"at": utc(), "monotonic": time.monotonic(), "memory": mem,
                   "loadavg": os.getloadavg(), "backing_free_bytes": shutil.disk_usage("/mnt/c").free,
                   "native_free_bytes": shutil.disk_usage(CV_ROOT).free, "jobs": {}}

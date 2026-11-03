@@ -68,12 +68,37 @@ async def terminate_group(pid, start_ticks, job_id, output):
         raise RuntimeError("Worker process group did not terminate")
 
 
-def reap_group(pid):
+def group_processes(pgid):
+    """All kernel entries, including zombies/empty cmdline, for an owned group."""
+    result = []
+    for path in Path("/proc").iterdir():
+        if path.name.isdigit():
+            try:
+                fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
+                if int(fields[2]) == pgid:
+                    result.append({"pid": int(path.name), "state": fields[0],
+                                   "ppid": int(fields[1]), "start_ticks": fields[19]})
+            except (FileNotFoundError, ProcessLookupError):
+                pass
+    return result
+
+
+async def reap_group(pid, timeout=3):
     # Call after await child.wait(): asyncio owns the direct worker's wait status.
+    # A grandchild can still be exiting after that wait. One WNOHANG pass is
+    # insufficient; wait for this specific group, not unrelated children.
+    deadline = asyncio.get_running_loop().time() + timeout
     while True:
-        try:
-            child, _ = os.waitpid(-pid, os.WNOHANG)
-            if child == 0:
+        while True:
+            try:
+                child, _ = os.waitpid(-pid, os.WNOHANG)
+                if child == 0:
+                    break
+            except ChildProcessError:
                 break
-        except ChildProcessError:
-            break
+        remaining = group_processes(pid)
+        if not remaining:
+            return
+        if asyncio.get_running_loop().time() >= deadline:
+            raise RuntimeError(f"Process group not fully reaped: {remaining}")
+        await asyncio.sleep(0.02)

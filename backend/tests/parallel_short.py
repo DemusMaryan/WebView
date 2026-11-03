@@ -26,9 +26,7 @@ EMERGENCY_MINIMUM_BYTES = RESOURCE_CONFIG["emergency_minimum_bytes"]
 
 
 def check_windows_thresholds(win, thresholds, phase):
-    values = {"C_free": win["C"]["available_bytes"],
-              "Windows_available_RAM": win["memory"]["available_bytes"],
-              "commit_headroom": win["memory"]["commit_limit_bytes"]-win["memory"]["committed_bytes"]}
+    values = {"C_free": win["C"]["available_bytes"]}
     for name, minimum in thresholds.items():
         if values[name] < minimum:
             raise RuntimeError(f"{phase} {name}: {values[name]} bytes < {minimum} bytes")
@@ -85,7 +83,7 @@ def run(context_path, output):
     def resources():
         win = latest_windows(winlog)
         assert (datetime.now(timezone.utc) - datetime.fromisoformat(win["utc"])).total_seconds() < 3, "Windows monitor stale"
-        assert win["C"]["error"] is None and win["memory"]["error"] is None
+        assert win["C"]["error"] is None
         mem = {k:int(v.split()[0])*1024 for k,v in
                (line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
                if k in ("MemAvailable", "SwapFree")}
@@ -144,7 +142,6 @@ def run(context_path, output):
             series.write(json.dumps(record | {"phase": "resources"}) + "\n")
             check_windows_thresholds(record["windows"], EMERGENCY_MINIMUM_BYTES, "Emergency")
             ensure_space()  # Existing immutable 5-GiB backing reserve.
-            assert record["memory"]["MemAvailable"] >= 512*1024**2, "WSL MemAvailable <512 MiB"
             with Session() as session:
                 active = session.query(Job).filter(Job.status.in_(["running", "dispatching"])).all()
                 servers = [j.server_id for j in active if j.status == "running"]

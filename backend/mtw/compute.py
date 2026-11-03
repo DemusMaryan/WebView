@@ -13,7 +13,7 @@ from sqlalchemy import select, text
 from .config import REPO, job_dir
 from .db import Job, Session, engine, now
 from .files import atomic_json, read_json
-from .processes import identity, members, reap_group, subreaper, terminate_group
+from .processes import identity, members, group_processes, reap_group, subreaper, terminate_group
 from .capacity import ensure_space
 from .frame_work import cleanup_decoded_frames
 from .scheduler import SERVERS
@@ -175,7 +175,7 @@ async def run_job(job_id, budget):
                     break
                 await asyncio.sleep(0.1)
             await child.wait()
-            reap_group(child.pid)
+            await reap_group(child.pid)
             if members(child.pid):
                 await terminate_group(child.pid, ticks, job_id, directory)
                 if status == "succeeded":
@@ -185,10 +185,10 @@ async def run_job(job_id, budget):
         if child and ticks:
             await terminate_group(child.pid, ticks, job_id, directory)
             await child.wait()
-            reap_group(child.pid)
+            await reap_group(child.pid)
         status = "failed"
     finally:
-        remaining = members(child.pid) if child else []
+        remaining = group_processes(child.pid) if child else []
         if remaining:
             # Fail closed: never free a DB/process slot while a descendant lives.
             with Session.begin() as session:
@@ -217,7 +217,7 @@ async def run_job(job_id, budget):
                 manifest = read_json(directory / "result.json")
                 job.processed_frames = job.total_frames = manifest["processed_frames"]
         atomic_json(directory / "termination.json", {"status": status, "error": error,
-                    "worker_pid": child.pid if child else None, "group_members_after": members(child.pid) if child else [],
+                    "worker_pid": child.pid if child else None, "group_members_after": group_processes(child.pid) if child else [],
                     "execution_seconds": elapsed})
         active = None
         slot.release()
