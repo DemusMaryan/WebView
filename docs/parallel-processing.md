@@ -1,10 +1,92 @@
 # Промпт 6: паралельні обчислення через Nginx — R5
 
-**03.11.2026, поточне приймання R5 не завершено.** Чинний RAM-поріг знижено користувачем до **1,5 GiB (1610612736 bytes)**. Останній передстартовий замір пройшов RAM і C:, але commit headroom був 3,1024 GiB при потрібних 4 GiB. Жодної нової задачі або автоматичної повторної пари немає. Фрагменти 0–10/0–12 с готові й не перекодовувалися повторно. Попередні невдалі suite не є прийманням нового запуску; ізоляція cancel/timeout у двослотовій моделі ще не завершена.
+**03.11.2026, коротка контрольна пара успішна.** Дві нові реальні задачі виконалися на compute-1/2 через Nginx; є два валідовані результати та консервативне перекриття native tracking **≥10,140 с**. Аварійні ресурсні межі не перетиналися. Це докази саме поточної успішної пари; попередні невдалі suite за неї не зараховуються. Повне приймання ізоляції cancel/timeout у двослотовій моделі ще не завершено, загальний R5 — частково. Додаткових задач поза погодженою однією парою не створено.
 
-## Чинний RAM-поріг 1,5 GiB та відмова через commit, 03.11.2026
+## Успішна пара 300/360 кадрів, 03.11.2026
 
-Тестові початкові пороги збережені у `config/r5-test-resources.toml`: **C_free=10737418240**, **Windows_available_RAM=1610612736**, **commit_headroom=4294967296** байтів. Локальний сценарій `backend/tests/parallel_short.py` читає цей файл; перевірено імпортом самого driver, що ефективні значення саме такі. Старі 3/2 GiB не використовуються для Available RAM. Чинні emergency guards не змінені: C: reserve 5 GiB, native FS reserve 2 GiB, WSL MemAvailable 512 MiB у сценарії. 2-GiB native disk reserve не є старим RAM-порогом. Це конфігурація контрольного тесту, не зміна вимог продукту чи системи.
+Чинна конфігурація контрольного тесту — `config/r5-test-resources.toml`. Початок: Windows Available RAM **≥1610612736 bytes (1,5 GiB)**, C: **≥10737418240 (10 GiB)**, commit headroom **≥2147483648 (2 GiB)**. Старі RAM 3/2 GiB і commit 4 GiB не застосовуються. Під час пари сценарій перевіряє Windows RAM **≥536870912**, C: **≥5368709120**, commit headroom **≥1073741824**; падіння нижче будь-якої межі припиняє сценарій і надсилає cancel тільки двом створеним UUID. Збережені додаткові native FS/WSL guards. Product limits у local.toml, підкачка, VHDX і CV не змінювалися.
+
+Нові 2 unit-тести перевірили фактичні початкові/аварійні значення, рівність межі як успіх і відмову на 1 байт нижче для кожного показника; **2 passed за 0,001 с**. Незмінені scheduler/CV-тести не повторювалися. Реальна пара не перетнула emergency thresholds, тому фактичне аварійне скасування цим прогоном не перевірене.
+
+Перед POST, **11:59:35,899 Europe/Kyiv**:
+
+| Показник | Фактичні байти | GiB | Поріг |
+| --- | ---: | ---: | ---: |
+| C: free | 21 301 321 728 | 19,83840 | 10 |
+| Windows Available RAM | 3 009 105 920 | 2,80245 | 1,5 |
+| CommitLimit−Committed | 3 390 205 952 | 3,15738 | 2 |
+
+Використано вже готові `[0,10)` / `[0,12)` clips, 640×480, 30 fps, RGB-only, PTS i/30; повторного encoding не було. Явний TUM1 calibration незмінний, інший відеовхід не отримує цей профіль автоматично. Source SHA/commands/calibration наведені у попередньому розділі підготовки.
+
+Команди з PowerShell у поточному repo (обидва output уже існують; для нового дозволеного прогону потрібні новий collector/context та нове ім'я evidence):
+
+```powershell
+wsl -d Ubuntu --exec env PYTHONPATH=backend:backend/tests /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python -m unittest discover -s backend/tests -p test_r5_resources.py -v
+wsl -d Ubuntu --exec bash scripts/start
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_short.py --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-short-20261103-commit2.json
+```
+
+Сценарій створив рівно два multipart POST через `http://127.0.0.1:8080/api/jobs`, `video=@...short-10s.mp4` / `...short-12s.mp4`, поле parameters з відповідного готового `.parameters.json`. Обидва повернули 202 queued за **0,225 / 0,053 с**, не очікуючи SLAM. Фактичні скорочені відповіді й проміжні запити:
+
+```text
+POST /api/jobs → 202 {"id":"d3a0a85a-00ec-409d-9db1-85e50b27ff2c","status":"queued",...}
+POST /api/jobs → 202 {"id":"4f7a65d8-f149-4514-820f-ac24b7352127","status":"queued",...}
+GET /api/jobs/d3a0a85a-00ec-409d-9db1-85e50b27ff2c/snapshot → 200 {"server_id":"compute-1","frame_id":35,"pose_valid":true,"tracking_state":2,...}
+GET /api/jobs/4f7a65d8-f149-4514-820f-ac24b7352127/snapshot → 200 {"server_id":"compute-2","frame_id":10,"pose_valid":true,"tracking_state":2,...}
+GET /api/jobs/{A,B}/result → 200, обидва валідовані
+```
+
+Dispatcher доставив обчислювальні запити через Nginx:8081; access log, UTC:
+
+```text
+2026-11-03T09:59:37+00:00 POST /execute HTTP/1.1 202 job=4f7a65d8-f149-4514-820f-ac24b7352127 upstream=127.0.0.1:8102 server=compute-2
+2026-11-03T09:59:37+00:00 POST /execute HTTP/1.1 202 job=d3a0a85a-00ec-409d-9db1-85e50b27ff2c upstream=127.0.0.1:8101 server=compute-1
+```
+
+| Факт | A | B |
+| --- | --- | --- |
+| job_id | `d3a0a85a-00ec-409d-9db1-85e50b27ff2c` | `4f7a65d8-f149-4514-820f-ac24b7352127` |
+| server_id | compute-1 | compute-2 |
+| Worker / native PID | 1553 / **1618** | 1552 / **1619** |
+| Старт compute, Kyiv | 11:59:37,597 | 11:59:37,591 |
+| Завершення compute, Kyiv | 12:00:09,804 | 12:00:13,427 |
+| Стан | succeeded | succeeded |
+| Frame records / valid live / null | **300 / 253 / 47** | **360 / 304 / 56** |
+| Final pose subset / points | **220 / 2722** | **223 / 2757** |
+| Point limit / truncated | 100000 / false | 100000 / false |
+| Worker wall / job execution, с | 30,723 / 31,489 | 34,402 / 35,121 |
+| Final geometry digest (двічі однаковий) | `798b03dd0cfe10fc` | `13e33036cdbd3a88` |
+
+Перекриття доведено живими native PID/start ticks, а не лише status=running. В 11 sample обидва native мали валідні tracking snapshots з точками. Від першого до останнього qualified sample CPU ticks зросли **A +2576 / B +2587** (CLK_TCK=100), frame_id **35→283 / 10→230**, JSONL **3 981 343→31 911 683 / 675 217→26 893 877 байтів**. Це справжні проміжні обчислення.
+
+Різниця початкових timestamps цих samples — 10,710260 с. Для консервативної межі виключено невідомий час HTTP/PID reads першого sample: до початку наступного sample перші обидва PID вже були перевірені, а останні reads ще не почалися на timestamp останнього. Отримано **≥10,140443 с monotonic**, межі **11:59:58,664–12:00:08,805 Kyiv**. Первинний evidence містить raw sampling span у старому полі overlap; уточнена консервативна оцінка перевірена read-only у `parallel-short-20261103-commit2-postcheck.json`, raw evidence не переписано. Driver тепер одразу використовує цю консервативну формулу.
+
+API залишався доступним: 310 контрольних HTTP requests, максимальна зафіксована затримка **0,643 с**; 23/26 різних frame_id спостерігалися в running snapshots. Для preview перевірено власний job/server_id, X-Frame-Id та PNG 640×480. Масиви snapshot ≤256 точок/240 trajectory records. Фінальний validator прочитав повний JSONL лише по одному разу: IDs 0–299/0–359, timestamps i/30, tracking state, Twc/SO(3)/unit quaternion, null, sorted final IDs як підмножина валідних live та узгоджені map_id/segment_id. Точки finite, cap/truncation коректні. Фінальні workers finished, active_gba=0, geometry_stable=true, geometry digests рівні в кожному job. Масштаб відносний. Worker/job wall охоплює decode, initialization, SLAM, JSONL/snapshots, shutdown/quiescence/export і керування; job також cleanup. Це не чиста швидкість SLAM.
+
+### Ресурси й збереження даних
+
+Один Windows collector PID **1560**, 0,5 с, **186 samples за 93,000 с**, 11:59:33,899–12:01:06,399 Kyiv; CPU 3,578 с, stderr порожній, завершений stop marker. WSL sampler записав resources/PID/CPU/RSS/progress та 10 after-samples. Заміри синхронізовані через UTC й посилання на Windows sample; тривалості визначено через monotonic.
+
+| Метрика | Мінімум / максимум зафіксованих samples | Emergency threshold |
+| --- | ---: | ---: |
+| Windows C: free, minimum | **21 298 954 240 bytes = 19,83620 GiB** | <5 GiB |
+| Windows Available RAM, minimum | **1 449 013 248 = 1,34950 GiB** | <512 MiB |
+| Windows commit headroom, minimum | **1 583 214 592 = 1,47448 GiB** | <1 GiB |
+| WSL MemAvailable, minimum | 5 820 162 048 = 5,42045 GiB | додатковий native guard |
+| WSL SwapFree, minimum | 2 GiB | виміряно |
+| Сума RSS двох native, sampled maximum | 1 163 083 776 = 1,08321 GiB | виміряно |
+
+Жодного emergency threshold у записі не перетнуто; API cancel не викликався. Після job/validation C: 21 299 503 104 bytes (19,83671 GiB); останній Windows sample — 21 298 982 912. Це sampled extrema, не невідомі піки між вимірами. Коротший ролик не подається як гарантія меншого RAM; стороннім програмам або pagefile причина зміни ресурсів не приписується.
+
+Усі **41 попередні задачі**: statuses та signatures файлів незмінні; CV/exporter/dependencies — ті самі 5 hashes. Після пари стало 43 задачі; групи нових workers порожні, slots вільні. Cleanup видалив тільки 300/360 робочих PNG нової пари; збережено 27/30 published previews, source video, JSONL, результати й логи. Після cleanup окремі read-only GET фінальних snapshots/previews дали 200, X-Frame-Id 299/359, PNG 640×480 при відсутньому sequence/rgb; БД має 43 jobs, активних 0. Наявні задачі й початкові 29 не очищалися. Автоматичних повторів, нового encoding, rebuild або системних змін не було.
+
+Evidence поза Git: `$DATA/reports/parallel-short-20261103-commit2.json` і `.jsonl` — **passed=true**; `parallel-short-20261103-commit2-postcheck.json` — read-only уточнення й перевірки; `parallel-short-20261103-commit2-preview-postcheck.json` — previews після cleanup; Windows `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T095933Z\windows.jsonl`, `exit.json`, порожній `error.txt`. Повні артефакти доступні через `GET /api/jobs/{id}/result` та посилання в manifest.
+
+Перевірений сценарій/пороги/unit-тести — локальний коміт **955d435**, author і committer `versal217 <versaldata@gmail.com>`. Нині виконано лише дозволену одну пару; не запускалися додаткові cancel/survivor/timeout jobs або новий full suite. Для повного початкового приймання Промпта 6 залишаються ізоляційні сценарії нової двослотової моделі. Два compute — незалежні HTTP-процеси на одному WSL-вузлі; це не дві окремі ВМ. Авторизація/HTTPS, ETA, autoscale та адмінпанель не реалізовувалися.
+
+## Історична відмова через колишній commit-поріг 4 GiB, 03.11.2026
+
+У цій попередній перевірці commit headroom мав бути ≥4 GiB; наступне уточнення користувача **скасувало цей поріг**, чинне значення — 2 GiB. Тодішні значення та preflight нижче збережені як історія, не як активна конфігурація. RAM залишився ≥1,5 GiB. Поточний успішний тест, emergency limits і коміт driver наведені на початку документа.
 
 Передстартовий Windows sample — **11:48:05,359 Europe/Kyiv**, WSL record — 11:48:05,460:
 
@@ -31,7 +113,7 @@ created_jobs=0, jobs={}, passed=false
 wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_short.py --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-short-20261103-ram15.json
 ```
 
-Конфігурацію порогів та звіт можна відтворити з локального коміту. Driver лишається локально незакоміченим: фактично перевірений preflight, але не success path із двома новими результатами. Для наступного дозволеного запуску — новий collector/context/output, ті самі готові clips і чинні пороги **1,5/10/4 GiB** (RAM/C:/commit). Не перебудовувати CV й не запускати старі повні suite.
+На цьому історичному кроці було закомічено тільки конфігурацію й звіт; driver тоді лишався незакоміченим через неперевірений success path. Згодом commit-поріг змінено на 2 GiB, пара пройшла, driver збережено у 955d435. Чинні значення, команди й докази наведені на початку документа; старі 1,5/10/4 GiB більше не застосовуються.
 
 ## Історія підготовки фрагментів і попередній RAM-поріг, 03.11.2026
 
