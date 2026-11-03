@@ -1,10 +1,41 @@
 # Промпт 6: паралельні обчислення через Nginx — R5
 
-**03.11.2026, поточне приймання R5 не завершено.** Фрагменти 0–10/0–12 с готові, але перед створенням задач Windows Available RAM знову стала нижчою за погоджені 3 GiB. Жодної нової задачі або автоматичної повторної пари немає. Фонові −7,32 MiB/хв C: користувач явно дозволив; це більше не блокер. Попередні невдалі suite залишаються історичними матеріалами, а не прийманням нового запуску. R5 — частково; ізоляція cancel/timeout у двослотовій моделі ще не завершена.
+**03.11.2026, поточне приймання R5 не завершено.** Чинний RAM-поріг знижено користувачем до **1,5 GiB (1610612736 bytes)**. Останній передстартовий замір пройшов RAM і C:, але commit headroom був 3,1024 GiB при потрібних 4 GiB. Жодної нової задачі або автоматичної повторної пари немає. Фрагменти 0–10/0–12 с готові й не перекодовувалися повторно. Попередні невдалі suite не є прийманням нового запуску; ізоляція cancel/timeout у двослотовій моделі ще не завершена.
 
-## Короткі фрагменти й передстартова перевірка, 03.11.2026
+## Чинний RAM-поріг 1,5 GiB та відмова через commit, 03.11.2026
 
-Практичні пороги **тільки для цієї контрольної спроби**: C: ≥10 GiB, Windows Available RAM ≥3 GiB, CommitLimit−Committed ≥4 GiB. Невеликий фоновий рух C: не є відмовою; робочий backing reserve лишається 5 GiB. Конфігурацію продукту, системи, CV, ABI та залежності не змінено. Повний storage audit, 60-секундний baseline й незмінені тести scheduler не повторювалися.
+Тестові початкові пороги збережені у `config/r5-test-resources.toml`: **C_free=10737418240**, **Windows_available_RAM=1610612736**, **commit_headroom=4294967296** байтів. Локальний сценарій `backend/tests/parallel_short.py` читає цей файл; перевірено імпортом самого driver, що ефективні значення саме такі. Старі 3/2 GiB не використовуються для Available RAM. Чинні emergency guards не змінені: C: reserve 5 GiB, native FS reserve 2 GiB, WSL MemAvailable 512 MiB у сценарії. 2-GiB native disk reserve не є старим RAM-порогом. Це конфігурація контрольного тесту, не зміна вимог продукту чи системи.
+
+Передстартовий Windows sample — **11:48:05,359 Europe/Kyiv**, WSL record — 11:48:05,460:
+
+| Показник | Фактичні байти | GiB | Поріг / результат |
+| --- | ---: | ---: | --- |
+| C: free | 21 296 521 216 | 19,83393 | ≥10, пройдено |
+| Available RAM Windows | 3 151 470 592 | 2,93504 | **≥1,5**, пройдено |
+| Committed | 29 294 317 568 | 27,28246 | виміряно |
+| Commit limit | 32 625 442 816 | 30,38481 | виміряно |
+| Commit headroom | **3 331 125 248** | **3,10235** | ≥4, відмова |
+
+```text
+AssertionError: Initial commit headroom <4 GiB
+created_jobs=0, jobs={}, passed=false
+```
+
+Сценарій зупинився до будь-якого job POST; немає нових job_id/server_id/native PID, snapshots або результатів. Це **передстартова відмова**, а не провал запущених обчислень. БД read-only підтвердила 41 задачу й 0 queued/dispatching/running. Наявні clips не готувалися знову. CV-ядро, ABI, залежності, shutdown та системні налаштування не змінювалися; власні services доступні, slots вільні. Автоматичного повтору не було.
+
+Один Windows collector PID **23052**, 0,5 с, записав **261 sample за 130,500 с**, 11:47:58,860–11:50:08,859 Kyiv. CPU 3,422 с, stderr порожній, завершений stop marker. WSL JSONL містить preflight та 10 after-samples. Мінімально зафіксований commit headroom — 3 156 938 752 байти; на останньому sample — 3 370 455 040. Вимога 4 GiB не виконана у preflight. Останній C: free — 21 294 292 992 байти (19,83186 GiB), 5-GiB reserve не порушений. Причина недостатнього запасу commit не встановлювалася повторним аудитом і не приписується проєкту.
+
+Артефакти поза Git: `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T094758Z\windows.jsonl`, `exit.json`, порожній `error.txt`; `$DATA/reports/parallel-short-20261103-ram15.json`, `.jsonl`, `parallel-short-20261103-ram15-resource-summary.json`. У самому evidence збережені фактичні thresholds і preflight до assert. Перевірені кліпи/валідатор з попереднього етапу повторно не тестувалися. Відтворення цієї передстартової перевірки було командою (output вже існує, не перезаписувати):
+
+```powershell
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_short.py --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-short-20261103-ram15.json
+```
+
+Конфігурацію порогів та звіт можна відтворити з локального коміту. Driver лишається локально незакоміченим: фактично перевірений preflight, але не success path із двома новими результатами. Для наступного дозволеного запуску — новий collector/context/output, ті самі готові clips і чинні пороги **1,5/10/4 GiB** (RAM/C:/commit). Не перебудовувати CV й не запускати старі повні suite.
+
+## Історія підготовки фрагментів і попередній RAM-поріг, 03.11.2026
+
+У цій попередній перевірці використовувався RAM-поріг 3 GiB; він **скасований** наступним уточненням користувача й більше не застосовується. Чинні 1,5/10/4 GiB наведені вище. Невеликий фоновий рух C: не є відмовою; робочий backing reserve лишається 5 GiB. Конфігурацію продукту, системи, CV, ABI та залежності не змінено. Повний storage audit, 60-секундний baseline й незмінені тести scheduler не повторювалися.
 
 | Момент, Europe/Kyiv | C: free, GiB | Available RAM, GiB | Commit headroom, GiB |
 | --- | ---: | ---: | ---: |

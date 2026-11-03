@@ -1,0 +1,6 @@
+# Initial reserves for this R5 control test, not product requirements.
+# Runtime emergency guards in local.toml are unchanged.
+[initial_thresholds_bytes]
+C_free = 10737418240
+Windows_available_RAM = 1610612736
+commit_headroom = 4294967296
