@@ -9,7 +9,7 @@ from mtw.files import atomic_json, read_json
 from mtw.worker import check_pose
 
 
-def validate(client, job_id):
+def validate(client, job_id, expected_frames=798):
     def get(path):
         r = client.get(path)
         r.raise_for_status()
@@ -32,6 +32,8 @@ def validate(client, job_id):
     final_ids = []
     for p in trajectory["poses"]:
         check_pose(p)
+        assert 0 <= p["frame_id"] < expected_frames
+        assert abs(p["timestamp"] - p["frame_id"]/30) < 1e-6
         assert (p["map_id"], p["segment_id"]) == (trajectory["map_id"], trajectory["segment_id"])
         final_ids.append(p["frame_id"])
     assert final_ids == sorted(set(final_ids))
@@ -40,13 +42,14 @@ def validate(client, job_id):
         raw.raise_for_status()
         for line in raw.iter_lines():
             row = json.loads(line)
+            assert row["type"] == "frame" and isinstance(row["tracking_state"], int)
             assert row["frame_id"] == count and abs(row["timestamp"] - count/30) < 1e-6
             check_pose(row)
             assert row["pose_valid"] == (row["Twc"] is not None)
             if row["pose_valid"]:
                 live_ids.add(count)
             count += 1
-    assert count == r["processed_frames"] == 798
+    assert count == r["processed_frames"] == expected_frames
     assert len(live_ids) == r["valid_live_poses"]
     assert set(final_ids) <= live_ids
     c = r["native_summary"]["final_snapshot_consistency"]
@@ -67,7 +70,8 @@ if __name__ == "__main__":
         raise ValueError("Validation evidence exists; choose a fresh path")
     source = read_json(args.evidence)
     with httpx.Client(base_url=f"http://127.0.0.1:{PORTS['entry']}", timeout=30, trust_env=False) as client:
-        result = {k:validate(client, source["jobs"][k]["id"]) for k in ("A", "B")}
+        result = {k:validate(client, source["jobs"][k]["id"], source["jobs"][k].get("expected_frames", 798))
+                  for k in ("A", "B")}
     assert result["A"]["state"]["server_id"] != result["B"]["state"]["server_id"]
     atomic_json(args.output, {"passed": True, "creates_jobs": False, "jobs": result,
                              "source_evidence": str(args.evidence)})
