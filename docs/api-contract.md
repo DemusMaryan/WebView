@@ -1,6 +1,8 @@
 # Поточний локальний API: задачі та історія
 
-Контракт Промптів 7–8, перевірено 03.11.2026. Вхід через Nginx: `http://127.0.0.1:8080`. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions і власність реалізовані; HTTPS та персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Налаштування, CLI та докази авторизації](authentication.md).
+Контракт Промптів 7–9, перевірено 03.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність і TLS 1.2/1.3 реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Налаштування, CLI та докази авторизації](authentication.md), [TLS і ручна довіра CA](https.md).
+
+HTTP:8080 GET/HEAD повертає 308 на canonical HTTPS зі збереженням path/query; інші методи — 426 без проксіювання user API. Прямий HTTP `/api/*` на приватному API:8000 повертає 400 `https_required`, також із підробленим forwarding. Довіряємо forwarded headers тільки від налаштованого loopback proxy з приватним X-MTW-Proxy-Key; Uvicorn proxy_headers=False. Host/Origin — canonical IP та порт 8443; localhost:8443 має валідний SAN і перенаправляється на canonical URL. Немає CORS. Сертифікати поза Git; curl використовує явний `--cacert`, системну довіру не встановлено.
 
 ## Авторизація
 
@@ -12,7 +14,7 @@
 | `GET /api/auth/me` | Поточні id/login, 401 без чинної авторизованої сесії |
 | `POST /api/auth/logout` | 204, відкликання серверної сесії й видалення cookie |
 
-Bootstrap доступний без входу, jobs/config та всі їхні підмаршрути потребують входу. Без нього 401 `authentication_required`; чужий або unowned job — 404. Для всіх API mutations, включно з register/login/logout, потрібні Origin з `[auth].allowed_origins` та X-CSRF-Token з bootstrap/входу поточної сесії; порушення — 403 `csrf_rejected`. Не передавати секрети в URL. Cookies HttpOnly/SameSite=Strict; cookie_mode=localhost-http лише для dev loopback, https режим завжди Secure. Auth validation errors не повертають password/input. Файлові відповіді захищені тим самим owner check, private/no-store.
+Bootstrap доступний без входу, jobs/config та всі їхні підмаршрути потребують входу. Без нього 401 `authentication_required`; чужий або unowned job — 404. Для всіх API mutations, включно з register/login/logout, потрібні Origin `https://127.0.0.1:8443` та X-CSRF-Token з bootstrap/входу поточної сесії; порушення — 403 `csrf_rejected`. Не передавати секрети в URL. Cookies **Secure/HttpOnly/SameSite=Strict**, cookie_mode=https; bootstrap оновлює старий dev-cookie без продовження строку БД. Auth validation errors не повертають password/input. Файлові відповіді захищені тим самим owner check, private/no-store. Preview/video/artifact URL відносні до HTTPS origin, без mixed content.
 
 ## Ліміти та створення
 
@@ -68,7 +70,7 @@ Upload передує admission: PostgreSQL transaction бере спільни�
 Порожня БД: `items=[]`, `total=0`, `total_pages=0`, обидва прапорці false. Сторінка за межами набору дає `200`, порожній `items`, незмінний total/total_pages; `has_previous=true`, якщо page>1 і total>0. Некоректне число/межа — `422` validation detail. Невідомі або повторені параметри — `422`, код `invalid_pagination_parameter`. Старий `?limit=50` більше не підтримується. Відповідь тепер об'єкт із `items`, а не старий масив; frontend оновлено разом із API.
 
 ```powershell
-curl.exe "http://127.0.0.1:8080/api/jobs?page=1&page_size=20"
+wsl -d Ubuntu --exec curl --cacert /home/demus/.local/share/monotrajectoryweb/web/tls/ca.crt.pem "https://127.0.0.1:8443/api/jobs?page=1&page_size=20"
 # Без cookie тепер 401. Авторизовану історію перевіряй через UI або захищений cookie jar.
 ```
 
