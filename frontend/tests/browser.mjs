@@ -136,7 +136,7 @@ try {
   assert.equal(await page.locator('#calibration').inputValue(), '', 'No implicit TUM calibration');
   const config = await api('/api/config');
   assert((await page.locator('.limits').innerText()).includes(String(config.limits.frames)));
-  const existing = process.env.MTW_EXISTING_JOB ?? (await api('/api/jobs?limit=100')).find(job => job.status === 'succeeded')?.id;
+  const existing = process.env.MTW_EXISTING_JOB ?? (await api('/api/jobs?page=1&page_size=100')).items.find(job => job.status === 'succeeded')?.id;
   assert(existing, 'An existing successful fixture job is required for the initial read-only smoke check');
   await page.goto(base + '/#jobs/' + existing);
   await page.getByRole('heading', { name: 'Фінальний результат', exact: true }).waitFor({ timeout: 30000 });

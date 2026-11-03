@@ -21,5 +21,5 @@ config = {'extends': str(repo / 'frontend/tsconfig.json'),
 (Path(os.environ['MTW_UI_WORK']) / 'tsconfig.json').write_text(json.dumps(config), encoding='utf-8')
 PY
 "$UI_DEPS/node_modules/.bin/tsc" --project "$UI_WORK/tsconfig.json"
-node --experimental-strip-types "$UI_REPO/frontend/tests/data.test.ts"
+node --test --experimental-strip-types "$UI_REPO/frontend/tests/data.test.ts" "$UI_REPO/frontend/tests/api.test.ts"
 "$UI_DEPS/node_modules/.bin/vite" build --config "$UI_REPO/frontend/vite.config.mjs" --configLoader native

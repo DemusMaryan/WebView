@@ -11,6 +11,8 @@ if any(str(p).startswith("/mnt/") or p == Path("/") for p in (CV_ROOT, DATA)):
     raise RuntimeError("Runtime data must be on the native WSL filesystem")
 PORTS = CONFIG["ports"]
 LIMITS = CONFIG["limits"]
+if type(LIMITS["stored_jobs"]) is not int or LIMITS["stored_jobs"] < 1:
+    raise ValueError("limits.stored_jobs must be a positive integer")
 TERMINAL = {"succeeded", "failed", "cancelled", "timed_out"}
 for directory in (DATA, DATA / "jobs", DATA / "logs", DATA / "pids"):
     directory.mkdir(parents=True, exist_ok=True)

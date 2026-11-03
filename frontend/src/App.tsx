@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { json } from './api';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { ApiError, json } from './api';
 import { parseCalibration } from './data';
 import type { MapModel } from './MapView';
 import type { Config, Job, JobStatus } from './types';
 import { terminal } from './types';
 import { useJob } from './useJob';
+import { useHistory } from './useHistory';
 
 const MapView = lazy(() => import('./MapView').then(module => ({ default: module.MapView })));
 
@@ -23,20 +24,15 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 
 export function App() {
   const [config, setConfig] = useState<Config | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const { history, jobs, error: historyError, loading: historyLoading, refresh, goToPage } = useHistory();
   const [id, setId] = useState<string | null>(currentId);
   const [video, setVideo] = useState<File | null>(null);
   const [calibration, setCalibration] = useState('');
   const [execution, setExecution] = useState('');
   const [formError, setFormError] = useState('');
-  const [historyError, setHistoryError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const refresh = useCallback(() => {
-    void json<Job[]>('/api/jobs').then(value => { setJobs(value); setHistoryError(''); })
-      .catch(error => setHistoryError(message(error)));
-  }, []);
   const { job, view, error } = useJob(id, config?.poll_interval_ms ?? 500, retry, refresh);
 
   useEffect(() => {
@@ -44,7 +40,6 @@ export function App() {
     void json<Config>('/api/config', { signal: controller.signal }).then(setConfig).catch(error => {
       if (!controller.signal.aborted) setFormError(message(error));
     });
-    refresh();
     const changed = () => { setId(currentId()); setCancelId(null); };
     window.addEventListener('hashchange', changed);
     return () => { controller.abort(); window.removeEventListener('hashchange', changed); };
@@ -68,8 +63,11 @@ export function App() {
       body.append('parameters', JSON.stringify({ ...parameters, execution_seconds: duration }));
       setSubmitting(true);
       const created = await json<Job>('/api/jobs', { method: 'POST', body });
-      selected(created.id); refresh();
-    } catch (failure) { setFormError(message(failure)); }
+      selected(created.id); goToPage(1); refresh();
+    } catch (failure) {
+      setFormError(message(failure));
+      if (failure instanceof ApiError && failure.code === 'stored_job_limit_reached') refresh();
+    }
     finally { setSubmitting(false); }
   };
   const cancel = async () => {
@@ -92,6 +90,8 @@ export function App() {
       map: snapshot.map_id ?? -1, segment: snapshot.segment_id ?? -1 };
   }, [view]);
   const snapshot = view?.snapshot;
+  const storedLimit = history?.stored_job_limit ?? config?.limits.stored_jobs;
+  const storedLimitReached = !!history && history.total >= history.stored_job_limit;
   const total = snapshot?.total_frames ?? job?.total_frames;
   const processed = snapshot?.processed_frames ?? job?.processed_frames ?? 0;
   const tracking = snapshot?.tracking_state;
@@ -127,15 +127,24 @@ export function App() {
               placeholder={String(config?.limits.execution_seconds ?? '')} onChange={event => setExecution(event.target.value)} />
             {config && <p className="limits">Ліміти backend: {config.limits.file_bytes / 1048576} MiB · {config.limits.duration_seconds} с відео · {config.limits.frames} кадрів · {config.limits.width}×{config.limits.height}. Execution включає декодування.</p>}
             {formError && <p className="error" role="alert">{formError}</p>}
-            <button className="primary" disabled={!config || submitting}>{submitting ? 'Завантаження…' : 'Створити задачу'}</button>
+            {storedLimit !== undefined && <p className="stored-limit">Ліміт збережених задач: <strong>{storedLimit}</strong></p>}
+            {storedLimitReached && <p className="error" role="status">Досягнуто ліміт збережених задач. Історія та результати доступні; нові задачі зараз не приймаються.</p>}
+            <button className="primary" disabled={!config || submitting || storedLimitReached}>{submitting ? 'Завантаження…' : 'Створити задачу'}</button>
           </form>
         </section>
         <section className="card history"><div className="card-heading"><h2>Історія задач</h2><button className="quiet" onClick={refresh}>Оновити список</button></div>
+          {history && <p className="history-total">Збережено {history.total} із {history.stored_job_limit}</p>}
           {historyError && <p className="error" role="alert">{historyError}</p>}
           <ul>{jobs.map(listed => { const item = job?.id === listed.id ? job : listed; return <li key={item.id}><button className={item.id === id ? 'job-link selected' : 'job-link'} onClick={() => selected(item.id)}>
             <span><code>{item.id.slice(0, 8)}</code><span className={`status ${item.status}`}>{labels[item.status]}</span></span>
             <small>{new Date(item.created_at).toLocaleString('uk-UA')} · {item.processed_frames} кадрів</small></button></li>; })}</ul>
-          {!jobs.length && <p className="muted">Збережених задач поки немає.</p>}
+          {!jobs.length && !historyLoading && !historyError && <p className="muted">Збережених задач поки немає.</p>}
+          {historyLoading && <p className="muted" role="status">Оновлення історії…</p>}
+          {history && <nav className="pagination" aria-label="Сторінки історії">
+            <button className="quiet" disabled={historyLoading || !history.has_previous} onClick={() => goToPage(history.page - 1)}>Попередня</button>
+            <span aria-live="polite">{history.total_pages ? `Сторінка ${history.page} із ${history.total_pages}` : 'Сторінок немає'}</span>
+            <button className="quiet" disabled={historyLoading || !history.has_next} onClick={() => goToPage(history.page + 1)}>Наступна</button>
+          </nav>}
         </section>
       </aside>
       <div className="workspace">
@@ -170,6 +179,6 @@ export function App() {
           </>}
       </div>
     </main>
-    <footer>Тільки localhost · авторизація та HTTPS заплановані · одна задача одночасно</footer>
+    <footer>Тільки localhost · авторизація та HTTPS заплановані · до двох задач одночасно</footer>
   </>;
 }

@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 from typing import Annotated
 from uuid import UUID, uuid4
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
@@ -96,11 +96,18 @@ async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated
         atomic_json(directory / "frame-work-policy.json", POLICY)
         def persist():
             with Session.begin() as session:
-                # Serialize admission so concurrent uploads cannot bypass the queue cap.
+                # The count and insert share this transaction/lock, including
+                # completed jobs. Uploads that lose admission are removed below.
                 session.execute(text("SELECT pg_advisory_xact_lock(7132101)"))
+                stored = session.scalar(select(func.count()).select_from(Job))
+                if stored >= LIMITS["stored_jobs"]:
+                    raise HTTPException(429, {"code": "stored_job_limit_reached",
+                        "message": "Stored job limit reached; history and results remain available",
+                        "limit": LIMITS["stored_jobs"], "count": stored})
                 pending = session.scalar(select(func.count()).select_from(Job).where(Job.status.not_in(TERMINAL)))
                 if pending >= LIMITS["queued_jobs"]:
-                    raise HTTPException(429, "Local pending job limit reached")
+                    raise HTTPException(429, {"code": "pending_job_limit_reached",
+                        "message": "Pending job limit reached", "limit": LIMITS["queued_jobs"], "count": pending})
                 job = Job(id=job_id, owner_id=None, parameters=params.model_dump(), input_ref="input.video")
                 session.add(job)
                 session.flush()
@@ -116,11 +123,22 @@ async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated
 
 
 @app.get("/api/jobs")
-def list_jobs(limit: int = 50):
-    if not 1 <= limit <= 100:
-        raise HTTPException(422, "limit must be 1..100")
-    with Session() as session:
-        return [serialize(job) for job in session.scalars(select(Job).order_by(Job.created_at.desc()).limit(limit))]
+def list_jobs(request: Request, page: int = Query(1, ge=1, le=2147483647),
+              page_size: int = Query(20, ge=1, le=100)):
+    unknown = set(request.query_params) - {"page", "page_size"}
+    if unknown or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
+        raise HTTPException(422, {"code": "invalid_pagination_parameter",
+                                 "message": "Use one page and page_size value; unknown parameters are not supported"})
+    with Session.begin() as session:
+        # Count and items describe one DB snapshot without blocking admission.
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        total = session.scalar(select(func.count()).select_from(Job))
+        pages = (total + page_size - 1) // page_size
+        items = [serialize(job) for job in session.scalars(select(Job)
+            .order_by(Job.created_at.desc(), Job.id.desc()).offset((page-1)*page_size).limit(page_size))]
+        return {"items": items, "total": total, "page": page, "page_size": page_size,
+                "total_pages": pages, "has_next": page < pages,
+                "has_previous": page > 1 and total > 0, "stored_job_limit": LIMITS["stored_jobs"]}
 
 
 @app.get("/api/jobs/{job_id}")

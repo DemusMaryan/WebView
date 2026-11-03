@@ -1,18 +1,33 @@
 import type { FinalData, Manifest, Point, Pose, Snapshot } from './types';
 
+export class ApiError extends Error {
+  status: number;
+  code: string | null;
+  constructor(status: number, code: string | null, message: string) {
+    super(message); this.name = 'ApiError'; this.status = status; this.code = code;
+  }
+}
+
 export async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', ...options });
   if (!response.ok) {
     const text = await response.text();
     let message = text;
+    let code: string | null = null;
     try {
       const detail = JSON.parse(text).detail;
+      if (typeof detail?.code === 'string') code = detail.code;
       message = Array.isArray(detail)
         ? detail.map((row: { loc?: unknown[]; msg: string }) => `${row.loc?.join('.') ?? ''}: ${row.msg}`).join('; ')
-        : typeof detail === 'string' ? detail : JSON.stringify(detail);
+        : typeof detail === 'string' ? detail : detail?.message ?? JSON.stringify(detail) ?? text;
+      if (code === 'stored_job_limit_reached') {
+        message = `Досягнуто ліміт збережених задач: ${detail.count} із ${detail.limit}. Нові задачі зараз не приймаються. Історія та результати залишаються доступними.`;
+      } else if (code === 'pending_job_limit_reached') {
+        message = `Досягнуто ліміт незавершених задач: ${detail.count} із ${detail.limit}. Дочекайтеся завершення або скасуйте поточну задачу.`;
+      }
     } catch { /* Nginx may return a short HTML body, e.g. HTTP 413. */ }
     if (response.status === 413) message = 'Файл або тіло запиту перевищує дозволений розмір.';
-    throw new Error(`HTTP ${response.status}: ${message.slice(0, 1600)}`);
+    throw new ApiError(response.status, code, `HTTP ${response.status}: ${message.slice(0, 1600)}`);
   }
   return response.json();
 }

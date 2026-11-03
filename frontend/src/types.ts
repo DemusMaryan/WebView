@@ -6,13 +6,17 @@ export type Calibration = {
 };
 export type Limits = {
   file_bytes: number; duration_seconds: number; frames: number; width: number; height: number;
-  execution_seconds: number; queued_jobs: number; snapshot_points: number; snapshot_trajectory: number;
+  execution_seconds: number; stored_jobs: number; queued_jobs: number; snapshot_points: number; snapshot_trajectory: number;
 };
 export type Config = { limits: Limits; poll_interval_ms: number };
 export type Job = {
   id: string; status: JobStatus; stage: string; processed_frames: number; total_frames: number | null;
   server_id: string | null; error: string | null; cancel_requested: boolean;
   created_at: string; parameters: { calibration: Calibration; execution_seconds: number };
+};
+export type JobPage = {
+  items: Job[]; total: number; page: number; page_size: number; total_pages: number;
+  has_next: boolean; has_previous: boolean; stored_job_limit: number;
 };
 export type Pose = {
   frame_id: number; timestamp: number; map_id: number; segment_id: number; Twc: Matrix | null;
