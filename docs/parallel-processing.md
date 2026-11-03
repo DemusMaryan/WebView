@@ -1,10 +1,88 @@
 # Промпт 6: паралельні обчислення через Nginx — R5
 
-**03.11.2026, коротка контрольна пара успішна.** Дві нові реальні задачі виконалися на compute-1/2 через Nginx; є два валідовані результати та консервативне перекриття native tracking **≥10,140 с**. Аварійні ресурсні межі не перетиналися. Це докази саме поточної успішної пари; попередні невдалі suite за неї не зараховуються. Повне приймання ізоляції cancel/timeout у двослотовій моделі ще не завершено, загальний R5 — частково. Додаткових задач поза погодженою однією парою не створено.
+**03.11.2026, Промпт 6 завершено, R5 перевірено в локальній конфігурації.** Успішна базова пара з перекриттям **≥10,140 с** та двома валідованими результатами збережена без повторного запуску. Завершено окремі перевірки ізоляції cancel/timeout після виправлення незбирання zombie. Сусідні задачі успішні, worker/native PID зникли з /proc, слоти вільні. Невдалі попередні перевірки залишені як історія й не зараховані за фінальний успіх. Наступні етапи не розпочиналися.
 
-## Успішна пара 300/360 кадрів, 03.11.2026
+## Завершення ізоляції cancel/timeout, 03.11.2026
 
-Чинна конфігурація контрольного тесту — `config/r5-test-resources.toml`. Початок: Windows Available RAM **≥1610612736 bytes (1,5 GiB)**, C: **≥10737418240 (10 GiB)**, commit headroom **≥2147483648 (2 GiB)**. Старі RAM 3/2 GiB і commit 4 GiB не застосовуються. Під час пари сценарій перевіряє Windows RAM **≥536870912**, C: **≥5368709120**, commit headroom **≥1073741824**; падіння нижче будь-якої межі припиняє сценарій і надсилає cancel тільки двом створеним UUID. Збережені додаткові native FS/WSL guards. Product limits у local.toml, підкачка, VHDX і CV не змінювалися.
+Чинний тестовий захист — **тільки диск**: C: ≥10737418240 bytes (10 GiB) перед стартом, аварійне скасування двох тестових UUID при C: <5368709120 (5 GiB). RAM Windows/WSL і commit записуються як telemetry; усі числові блокування/автоскасування за ними прибрані з R5 drivers. Недоступна Windows memory telemetry також не блокує disk gate. Три цільові тести перевірили обидві точні дискові межі та дозвіл при RAM=0, commit pressure і memory=null/error; **3 passed, 0,001 с**. Продуктові disk guards, максимальні 2 reservations / 1 на compute, час виконання й cancel залишені. Windows/WSL/pagefile/VHDX не налаштовувалися.
+
+### Виявлена помилка та мінімальне виправлення
+
+Перші ізоляційні звіти `parallel-isolation-cancel-20261103.json` і `parallel-isolation-timeout-20261103.json` мали passed=true за перевіркою живих груп, але фінальний незалежний огляд /proc виявив **zombie 1937/2095**, PPid=471, PGid=1888/2036, RSS=0. Це не живі обчислення й не доказ причини RAM/disk-провалів, але вимога повного збирання процесів не виконувалася. Вони **не є прийнятими ізоляційними доказами**. Діагностика — `parallel-isolation-20261103-reaping-failure.json`; старі raw reports і результати не переписано.
+
+Причина в Python lifecycle: `members()` і `identity()` відкидали zombie/порожній cmdline; `reap_group()` робив одноразовий nonblocking wait і міг повернутися, поки orphan ще завершувався. Виправлення в `mtw/processes.py` / `compute.py`: bounded async drain тільки власного PGid, облік усіх kernel entries, включно із Z, та утримання слота до повного зникнення групи. Живий сусідній PGid не збирається. Це виправлення керування дочірніми процесами Python; ORB-SLAM3 Shutdown, прапорці ABI та залежності незмінні.
+
+Новий regression test використовує справжній orphan, вихід якого контролюється pipe після завершення direct child, і окрему живу сусідню групу. Він підтвердив очікування пізнього exit, збирання zombie та недоторканість сусіднього процесу: **1 passed, 0,130 с**, без SLAM/штучних затримок у відео. Перезапущено лише два власні idle compute-сервіси для завантаження коду; PostgreSQL/API/dispatcher не перезапускалися. Старі zombie після завершення їхнього idle батька зникли, це перевірено через /proc. Потім виконано **по одній новій спробі** кожного ураженого сценарію під новими disk-only правилами; автоматичних повторів після них немає.
+
+### Прийняті задачі й події
+
+Усі часи — Europe/Kyiv, 03.11.2026; тривалості — monotonic, бо UTC у WSL коригувався.
+
+| Сценарій / роль | job_id | server_id | worker / native PID | Фінальний стан |
+| --- | --- | --- | --- | --- |
+| cancel / target, 300 кадрів | `6754c8cf-ff72-4338-8cab-2184b032acc4` | compute-1 | 2338 / 2388 | cancelled |
+| cancel / survivor, 360 кадрів | `b8d21362-141d-4db6-8f97-d55a19052dd7` | compute-2 | 2339 / 2389 | succeeded |
+| timeout / target, 300 кадрів | `4fd38b92-0559-49e9-90c5-b364bd0bee4f` | compute-1 | 2469 / 2521 | timed_out |
+| timeout / survivor, 360 кадрів | `ad174e33-fa00-467e-9909-e580bbac0e6f` | compute-2 | 2470 / 2522 | succeeded |
+
+**Cancel:** старт compute 12:41:46,928/46,930; обидва native працюють о 12:41:59,513. `POST /api/jobs/6754c8cf-ff72-4338-8cab-2184b032acc4/cancel` → 202 о **12:42:07,828**. О **12:42:08,402** підтверджено відсутність worker/native в /proc, порожню групу включно із Z і health compute-1 `busy=false, active_job=null` — через 0,574 с після ack. Сусідній **PID 2389 незмінний**, CPU ticks **865→994**, frame_id **10→19** після зупинки target. Target finished_at=12:42:08,108, job execution=20,461 с; survivor завершився о **12:42:20,160**, job execution=32,513 с.
+
+**Timeout:** застосовано вже наявний per-job `parameters.execution_seconds=22` тільки target; survivor має 180. Нового публічного API не додано, глобальний конфіг не змінювався. Старт compute 12:43:31,515/31,717; обидва native працюють о **12:43:46,137**. Target о **12:43:54,514** отримав `timed_out`, error=`Execution exceeded 22 seconds; queue time excluded; process group terminated`, job execution **22,329 с** з termination/reap/cleanup. О **12:43:54,929** worker/native відсутні, група порожня, compute-1 slot вільний. Сусідній **PID 2522 незмінний**, CPU ticks **821→1069**, frame_id **0→19**; завершення о **12:44:07,111**, job execution=34,725 с. Стандартний public execution limit до/після — **180 с**, hashes config/local.toml та тестового конфігу незмінні протягом кожного сценарію. Тимчасової глобальної настройки для відновлення не було; 22 с залишені лише в метаданих завершеної цільової задачі як правдивий доказ тесту.
+
+Обчислювальні handoffs через Nginx:8081 (UTC; не прямі execute-виклики):
+
+```text
+2026-11-03T10:41:46+00:00 POST /execute HTTP/1.1 202 job=6754c8cf-ff72-4338-8cab-2184b032acc4 upstream=127.0.0.1:8101 server=compute-1
+2026-11-03T10:41:46+00:00 POST /execute HTTP/1.1 202 job=b8d21362-141d-4db6-8f97-d55a19052dd7 upstream=127.0.0.1:8102 server=compute-2
+2026-11-03T10:43:31+00:00 POST /execute HTTP/1.1 202 job=4fd38b92-0559-49e9-90c5-b364bd0bee4f upstream=127.0.0.1:8101 server=compute-1
+2026-11-03T10:43:31+00:00 POST /execute HTTP/1.1 202 job=ad174e33-fa00-467e-9909-e580bbac0e6f upstream=127.0.0.1:8102 server=compute-2
+```
+
+### Валідація, API та очистка
+
+| Валідований survivor | cancel | timeout |
+| --- | ---: | ---: |
+| JSONL frame records / valid live / null | 360 / 306 / 54 | 360 / 302 / 58 |
+| Final pose subset / points | 252 / 2742 | 239 / 2730 |
+| Point cap / truncated | 100000 / false | 100000 / false |
+| Worker wall, с | 31,801 | 33,823 |
+| Final digest (обидва знімки однакові) | `b8f3cfafbb6b1771` | `1f57220302cac2e8` |
+
+Перевірені IDs 0–359, PTS i/30, Twc/кватерніони/SO(3), null, межі map_id/segment_id, finite points, point-cap contract, завершені mapper/loop, active_gba=0 та stable geometry. Масштаб відносний. Wall включає decode, initialization, SLAM, export/quiescence/керування, не є чистим CPU/FPS SLAM. API був доступним упродовж обох пар: **289/305** контрольних HTTP requests, максимум **0,071/0,338 с**. Snapshots/preview відповідають власному job/frame/server; масиви обмежені.
+
+Для target `/result` повертає **409**, фінальний успішний результат не вигадується. Збережені complete prefixes raw JSONL: cancel **50 records / 38 valid poses**, timeout **67 / 53**, incomplete tail=0 bytes. Останні published snapshots мають frame_id **48/61**: worker міг не встигнути опублікувати останні вже записані native rows перед сигналом. Це не прирівнюється до завершених 300 кадрів або до фінальної карти.
+
+Strict final check підтвердив **відсутність усіх восьми worker/native PID у /proc**, а не тільки `identity=None`; жодного zombie чи члена цих груп немає. Видалено тільки 300/360 PNG на кожну нову пару, source/JSONL/results/logs збережені. Published previews збережено 6/25 у cancel і 7/26 у timeout; після cleanup GET кадрів **48/359/61/359** → 200. Готові відео й завантажені копії збігаються з початковими SHA, повторного encoding не було. Слоти обох compute вільні, **51 задача в БД, активних 0**. Старі 47 задач незмінні після cancel, старі 49 — після timeout; успішний базовий R5 proof і 5 CV binary hashes незмінні.
+
+### Інформаційна телеметрія та відтворення
+
+Один Windows collector PID **18608**, 0,5 с, **339 samples за 169,501 с**, 12:41:44,115–12:44:33,114 Kyiv; CPU 5,438 с, stderr порожній, зупинений marker. WSL series містять до/під час/10 after-samples, PID/CPU ticks/RSS/tracking. Підготовчий загальний аудит або новий 60-секундний baseline не проводилися.
+
+| Метрика | cancel | timeout |
+| --- | ---: | ---: |
+| C: free перед стартом, bytes | 21 338 570 752 | 21 236 736 000 |
+| C: minimum, bytes | 21 236 948 992 | 21 199 429 632 |
+| RAM minimum, інформаційно, bytes | **460 316 672** | **332 054 528** |
+| Commit headroom minimum, інформаційно, bytes | 2 207 866 880 | 1 670 602 752 |
+
+RAM падала нижче колишніх 512 MiB; це **не викликало автоскасування**, відповідно до нового правила користувача. C: не опускався нижче 5 GiB. Після timeout C: 21 199 429 632 bytes; останній Windows sample — 21 193 994 240 bytes, близько 19,74 GiB. Причини зовнішніх змін пам'яті/місця не приписуються проєкту без окремих доказів.
+
+Виконані команди (outputs уже існують; це запис прогону, не вимога повторення):
+
+```powershell
+wsl -d Ubuntu --exec bash scripts/stop compute-1 compute-2
+wsl -d Ubuntu --exec bash scripts/start compute-1 compute-2
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_isolation.py --scenario cancel --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-isolation-cancel-reaped-20261103.json
+wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_isolation.py --scenario timeout --timeout-seconds 22 --context /home/demus/.local/share/monotrajectoryweb/web/reports/monitored-r5-current.json --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-isolation-timeout-reaped-20261103.json
+```
+
+`$DATA/reports/parallel-isolation-{cancel,timeout}-reaped-20261103.json` і `.jsonl` — обидва **passed=true**; `parallel-isolation-20261103-reaped-resource-summary.json` — зведення; `parallel-isolation-20261103-reaped-final-check.json` — strict process/preview/defaults/core/proof check, **passed=true, creates_jobs=false**. Windows series: `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T104143Z\windows.jsonl`, exit.json, порожній error.txt. Журнали/медіа/БД поза Git. Код — **dafba89**, author і committer `versal217 <versaldata@gmail.com>`.
+
+У межах погоджених сценаріїв залишку Промпта 6 немає. Це два незалежні HTTP compute-процеси одного WSL-вузла; не дві ВМ. R7 про автоматичні ВМ/контейнери й інші майбутні етапи не реалізовувалися.
+
+## Збережений доказ успішної пари 300/360 кадрів, 03.11.2026
+
+Ця базова пара пройшла за тодішньої конфігурації: RAM ≥1,5 GiB, C: ≥10 GiB, commit ≥2 GiB та аварійних RAM/C:/commit 512 MiB/5 GiB/1 GiB. Згодом користувач прибрав усі RAM/commit gates; чинний disk-only сценарій і результати ізоляції наведені вище. Історичні значення в raw proof не змінювалися. Product limits у local.toml, підкачка, VHDX і CV не змінювалися.
 
 Нові 2 unit-тести перевірили фактичні початкові/аварійні значення, рівність межі як успіх і відмову на 1 байт нижче для кожного показника; **2 passed за 0,001 с**. Незмінені scheduler/CV-тести не повторювалися. Реальна пара не перетнула emergency thresholds, тому фактичне аварійне скасування цим прогоном не перевірене.
 
@@ -82,7 +160,7 @@ API залишався доступним: 310 контрольних HTTP reque
 
 Evidence поза Git: `$DATA/reports/parallel-short-20261103-commit2.json` і `.jsonl` — **passed=true**; `parallel-short-20261103-commit2-postcheck.json` — read-only уточнення й перевірки; `parallel-short-20261103-commit2-preview-postcheck.json` — previews після cleanup; Windows `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T095933Z\windows.jsonl`, `exit.json`, порожній `error.txt`. Повні артефакти доступні через `GET /api/jobs/{id}/result` та посилання в manifest.
 
-Перевірений сценарій/пороги/unit-тести — локальний коміт **955d435**, author і committer `versal217 <versaldata@gmail.com>`. Нині виконано лише дозволену одну пару; не запускалися додаткові cancel/survivor/timeout jobs або новий full suite. Для повного початкового приймання Промпта 6 залишаються ізоляційні сценарії нової двослотової моделі. Два compute — незалежні HTTP-процеси на одному WSL-вузлі; це не дві окремі ВМ. Авторизація/HTTPS, ETA, autoscale та адмінпанель не реалізовувалися.
+На момент цієї базової пари сценарій/пороги/unit-тести збережено у **955d435**, author і committer `versal217 <versaldata@gmail.com>`; ізоляційні сценарії тоді ще залишалися. Вони завершені пізніше й описані на початку документа, базову пару не повторювали. Два compute — незалежні HTTP-процеси одного WSL-вузла, не дві ВМ. Авторизація/HTTPS, ETA, autoscale та адмінпанель не реалізовувалися.
 
 ## Історична відмова через колишній commit-поріг 4 GiB, 03.11.2026
 
@@ -228,11 +306,11 @@ Raw Windows: `%LOCALAPPDATA%\MonoTrajectoryWeb\diagnostics\20261103T083843Z\wind
 - Dispatcher доставляє reservations конкурентно тільки на `127.0.0.1:8081/execute`. Nginx має два round-robin upstream (`8101`, `8102`), POST replay вимкнено. Зайнятий compute дає 409; повторна спроба використовує той самий token. Фактичний server_id записує compute, а не клієнт.
 - Compute має один asyncio slot, захищений від другого активного запису partial unique index та від другого процесу з тим самим server_id session advisory lease. `/execute` швидко повертає 202, фонова task володіє worker process group. Повтор running-доставки власнику — idempotent 202 без нового PID, іншому серверу — 409. Для завершеної задачі — 409. Є exclusive per-job `execution-start.json`.
 - Restart dispatcher не зупиняє worker і не повторює running. Незавершений dispatching зберігає token для повторної доставки; це не нове обчислення. Queue time не входить в execution budget. Cancel queued/dispatching атомарно завершує reservation до запуску.
-- TERM/KILL, перевірка PID/start identity, reap і cleanup збережені. Слот не звільняється при живих членах групи: залишається running/termination_failed. Старі задачі не очищаються; нові preview/source/results зберігаються за наявною політикою.
+- TERM/KILL, перевірка PID/start identity і cleanup збережені. Reap тепер дочікується повного зникнення власної групи, включно із zombie/empty cmdline; до цього слот лишається running/termination_failed. Старі задачі не очищаються; нові preview/source/results зберігаються за наявною політикою.
 
 CV-ядро, залежності, `-march=native`, ABI та shutdown не змінювалися й не перебудовувалися. Авторизація/HTTPS, ETA, autoscale та адмінпанель не додаються.
 
-## Команди
+## Історичні команди первинних прогонів
 
 У поточній робочій папці PowerShell. Для оновлення на підготовленому середовищі, без активних задач:
 
@@ -371,7 +449,7 @@ ValueError: Insufficient free space on /mnt/c: 1737760768 bytes free; reserve 53
 
 `parallel-20261103-retry-postcheck.json` підтвердив: усі 36 попередніх job-каталогів/станів (включно з початковими 33 та першою спробою) незмінні, п'ять binary hashes core/exporter/dependencies однакові. Всього стало 41 job; активних немає, усі створені worker process groups порожні, робочих `sequence/rgb` немає. Успішні results, source, previews та потрібні артефакти збережені. Міграція 0002 та unique index наявні у власній БД.
 
-Залишок приймання: ізоляція cancel при живому іншому native, timeout на звільненому слоті зі збереженням іншої задачі, валідований результат survivor та загальний успішний підсумок isolation suite. Після цього можна змінити R5 на перевірений; до цього статус частковий.
+На момент цього історичного прогону залишалися cancel/timeout isolation та валідований survivor. Згодом цей залишок закрито прийнятими сценаріями після reaping-fix, описаними на початку документа. Старі suite з passed=false не переписані й не видаються за успішне повне приймання.
 
 Локальний коміт перевіреної реалізації — `56f082c` (`feat(dispatch): execute two reserved jobs concurrently through nginx`). Author і committer — підтверджена користувацька ідентичність, перевірені безпосередньо перед комітом. Історію не переписано; стороння заміна файла промптів і `Release` не включені. Цей коміт не означає завершення заблокованих перевірок ізоляції.
 
