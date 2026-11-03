@@ -6,7 +6,7 @@ import os
 import sys
 import time
 from uuid import UUID
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -17,6 +17,7 @@ from .processes import identity, members, group_processes, reap_group, subreaper
 from .capacity import ensure_space
 from .frame_work import cleanup_decoded_frames
 from .scheduler import SERVERS
+from .service_auth import require_service
 
 SERVER_ID = os.environ["MTW_SERVER_ID"]
 if SERVER_ID not in SERVERS:
@@ -64,7 +65,8 @@ async def lifespan(app):
             lease.close()
 
 
-app = FastAPI(title=f"MonoTrajectoryWeb {SERVER_ID}", lifespan=lifespan)
+app = FastAPI(title=f"MonoTrajectoryWeb {SERVER_ID}", lifespan=lifespan,
+              dependencies=[Depends(require_service)], docs_url=None, redoc_url=None, openapi_url=None)
 
 
 class Execution(BaseModel):

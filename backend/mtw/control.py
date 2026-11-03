@@ -15,6 +15,7 @@ import httpx
 from .config import CONFIG_PATH, DATA, LIMITS, PORTS, REPO
 from .files import atomic_json, read_json
 from .processes import identity
+from .service_auth import ensure_service_key, service_headers
 
 PG_BIN = Path("/usr/lib/postgresql/16/bin")
 PGDATA = DATA / "pgdata"
@@ -70,6 +71,7 @@ def pg_start():
 
 
 def setup():
+    ensure_service_key()
     import psycopg
     from psycopg import sql
     from sqlalchemy.engine import URL
@@ -130,12 +132,17 @@ http {{
         listen 127.0.0.1:{PORTS['entry']};
         location /api/ {{
             proxy_pass http://127.0.0.1:{PORTS['api']};
+            proxy_set_header Host $http_host;
             proxy_read_timeout 30s;
             proxy_request_buffering off;
         }}
         location = /health {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
         location = /openapi.json {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
         location = /docs {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
+        location = /execute {{ return 404; }}
+        location /jobs/ {{ return 404; }}
+        location /artifacts/ {{ return 404; }}
+        location /internal/ {{ return 404; }}
         location / {{
             root "{DATA}/ui";
             try_files $uri $uri/ /index.html;
@@ -144,11 +151,13 @@ http {{
     }}
     server {{
         listen 127.0.0.1:{PORTS['balancer']};
-        location / {{
+        location = /execute {{
             proxy_pass http://computes;
             proxy_read_timeout {int(LIMITS['execution_seconds']) + 30}s;
             proxy_next_upstream off;
         }}
+        location = /health {{ proxy_pass http://computes; }}
+        location / {{ return 404; }}
     }}
 }}
 '''
@@ -204,7 +213,8 @@ def wait_health(port):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
-            response = httpx.get(f"http://127.0.0.1:{port}/health", timeout=1, trust_env=False)
+            response = httpx.get(f"http://127.0.0.1:{port}/health", timeout=1, trust_env=False,
+                                 headers=service_headers() if port in (PORTS["compute_1"], PORTS["compute_2"]) else {})
             if response.status_code == 200:
                 return
         except httpx.HTTPError:
@@ -214,6 +224,7 @@ def wait_health(port):
 
 
 def start(names):
+    ensure_service_key()
     pg_start()
     write_nginx()
     for name in names:
@@ -267,9 +278,12 @@ def status():
     for name in ("api", "compute-1", "compute-2"):
         try:
             result["services"][name]["health"] = httpx.get(
-                f"http://127.0.0.1:{PORTS[name.replace('-', '_')]}/health", timeout=1, trust_env=False).json()
+                f"http://127.0.0.1:{PORTS[name.replace('-', '_')]}/health", timeout=1, trust_env=False,
+                headers=service_headers() if name.startswith("compute-") else {}).json()
         except httpx.HTTPError:
             pass
+        except (OSError, RuntimeError):
+            result["services"][name]["health_error"] = "Private service credential unavailable; run scripts/start"
     print(json.dumps(result, indent=2))
 
 

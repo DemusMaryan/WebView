@@ -6,6 +6,7 @@ import type { Config, Job, JobStatus } from './types';
 import { terminal } from './types';
 import { useJob } from './useJob';
 import { useHistory } from './useHistory';
+import { AuthGate, type User } from './Auth';
 
 const MapView = lazy(() => import('./MapView').then(module => ({ default: module.MapView })));
 
@@ -23,6 +24,10 @@ const currentId = () => {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export function App() {
+  return <AuthGate>{(user, logout) => <Workspace key={user.id} user={user} logout={logout} />}</AuthGate>;
+}
+
+function Workspace({ user, logout }: { user: User; logout: () => Promise<void> }) {
   const [config, setConfig] = useState<Config | null>(null);
   const { history, jobs, error: historyError, loading: historyLoading, refresh, goToPage } = useHistory();
   const [id, setId] = useState<string | null>(currentId);
@@ -101,7 +106,7 @@ export function App() {
 
   return <>
     <header className="topbar"><div><strong className="brand">MonoTrajectory<span>Web</span></strong>
-      <p>Монокулярне відео → траєкторія та розріджена карта</p></div><span className="local-badge">Локальний прототип</span></header>
+      <p>Монокулярне відео → траєкторія та розріджена карта</p></div><div className="account"><span className="current-user">{user.login}</span><button className="quiet" onClick={() => void logout()}>Вийти</button></div></header>
     <main className="layout">
       <aside className="sidebar">
         <section className="card upload"><h1>Нова задача</h1><p className="muted">Записане RGB-відео та параметри його камери.</p>
@@ -133,7 +138,7 @@ export function App() {
           </form>
         </section>
         <section className="card history"><div className="card-heading"><h2>Історія задач</h2><button className="quiet" onClick={refresh}>Оновити список</button></div>
-          {history && <p className="history-total">Збережено {history.total} із {history.stored_job_limit}</p>}
+          {history && <p className="history-total">Ваших задач: {history.total} · глобальний ліміт {history.stored_job_limit}</p>}
           {historyError && <p className="error" role="alert">{historyError}</p>}
           <ul>{jobs.map(listed => { const item = job?.id === listed.id ? job : listed; return <li key={item.id}><button className={item.id === id ? 'job-link selected' : 'job-link'} onClick={() => selected(item.id)}>
             <span><code>{item.id.slice(0, 8)}</code><span className={`status ${item.status}`}>{labels[item.status]}</span></span>
@@ -179,6 +184,6 @@ export function App() {
           </>}
       </div>
     </main>
-    <footer>Тільки localhost · авторизація та HTTPS заплановані · до двох задач одночасно</footer>
+    <footer>Тільки localhost · сесії та власність задач · HTTPS заплановано · до двох задач одночасно</footer>
   </>;
 }

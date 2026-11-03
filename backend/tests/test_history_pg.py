@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import secrets
 from pathlib import Path
 import tempfile
 from threading import Barrier
@@ -16,9 +17,9 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.orm import sessionmaker
-from mtw import api, frame_work
+from mtw import api, auth, frame_work
 from mtw.config import DATA, database_url
-from mtw.db import Base, Job
+from mtw.db import AuthSession, Base, Job, User, now
 from test_contracts import CALIBRATION
 
 
@@ -48,17 +49,28 @@ class HistoryPostgresTests(unittest.TestCase):
     def setUp(self):
         with self.sessions.begin() as s:
             s.execute(text("DELETE FROM jobs"))
+            s.execute(text("DELETE FROM auth_sessions"))
+            s.execute(text("DELETE FROM users"))
         self.temporary = tempfile.TemporaryDirectory(prefix="history-test-", dir=DATA / "reports")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / "jobs").mkdir()
         self.enterContext(patch.object(api, "Session", self.sessions))
+        self.enterContext(patch.object(auth, "Session", self.sessions))
         self.enterContext(patch.object(api, "job_dir", lambda job_id: self.root / "jobs" / str(job_id)))
         self.enterContext(patch.object(frame_work, "DATA", self.root))
         self.enterContext(patch.dict(api.LIMITS, stored_jobs=100, queued_jobs=10))
+        token = secrets.token_urlsafe(32)
+        with self.sessions.begin() as s:
+            user = User(login="history_fixture", password_hash=auth.hasher.hash(secrets.token_urlsafe(24)))
+            s.add(user)
+            s.flush()
+            self.user_id = user.id
+            s.add(AuthSession(token_hash=auth.token_hash(token), user_id=user.id, expires_at=now() + timedelta(hours=1)))
+        self.headers = {"Cookie": f"{auth.COOKIE}={token}", "Origin": "http://127.0.0.1:8080", "X-CSRF-Token": auth.csrf_token(token)}
 
     async def request_async(self, method, path, **kwargs):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://test") as c:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api.app), base_url="http://127.0.0.1:8080", headers=self.headers) as c:
             return await c.request(method, path, **kwargs)
 
     def request(self, method, path, **kwargs):
@@ -69,6 +81,7 @@ class HistoryPostgresTests(unittest.TestCase):
                 "data": {"parameters": json.dumps({"calibration": CALIBRATION} | parameters)}}
 
     def seed(self, status="succeeded", **values):
+        values.setdefault("owner_id", self.user_id)
         with self.sessions.begin() as s:
             job = Job(status=status, stage=status, parameters={"calibration": CALIBRATION, "frames": 1200},
                       input_ref="test-only", **values)

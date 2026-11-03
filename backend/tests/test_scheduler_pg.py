@@ -83,11 +83,22 @@ class SchedulerPostgresTests(unittest.TestCase):
 
     def test_cancel_unaccepted_reservation_blocks_late_delivery(self):
         from mtw import api
+        from mtw.auth import hasher
+        from mtw.db import User
+        from starlette.requests import Request
+        import secrets
         reservation = reserve_next(self.sessions)
+        with self.sessions.begin() as s:
+            user = User(login="scheduler_fixture", password_hash=hasher.hash(secrets.token_urlsafe(24)))
+            s.add(user)
+            s.flush()
+            s.get(Job, reservation["job_id"]).owner_id = user.id
+            owner_id = str(user.id)
+        request = Request({"type": "http", "state": {"auth": {"user": {"id": owner_id}}}})
         # Only the isolated schema is used; a nonexistent preview directory has
         # no cleanup marker and cannot affect any saved job.
         with patch.object(api, "Session", self.sessions):
-            result = api.cancel(reservation["job_id"])
+            result = api.cancel(reservation["job_id"], request)
         self.assertEqual(result["status"], "cancelled")
         self.assertFalse(still_reserved(reservation, self.sessions))
         self.assertEqual(outstanding(self.sessions), [])

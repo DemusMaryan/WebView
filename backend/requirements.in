@@ -7,3 +7,4 @@ httpx
 python-multipart
 av
 pillow
+argon2-cffi

@@ -6,17 +6,28 @@ from typing import Annotated
 from uuid import UUID, uuid4
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import LIMITS, TERMINAL, job_dir
 from .contracts import JobParameters, empty_snapshot
 from .db import Job, Session, now, serialize
 from .files import atomic_json, read_json
 from .capacity import ensure_space
 from .frame_work import POLICY, cleanup_decoded_frames
+from .auth import BrowserSecurity, router as auth_router
 
-app = FastAPI(title="MonoTrajectoryWeb local API", version="0.4.0")
+app = FastAPI(title="MonoTrajectoryWeb local API", version="0.8.0")
+app.include_router(auth_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exception):
+    # Pydantic's default error includes input, which can contain a password.
+    return JSONResponse({"detail": [{k: row[k] for k in ("loc", "msg", "type")}
+                                     for row in exception.errors()]}, status_code=422)
 
 
 class UploadLimit:
@@ -26,7 +37,7 @@ class UploadLimit:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        limit = LIMITS["file_bytes"] + 65536
+        limit = 8192 if scope["path"].startswith("/api/auth/") else LIMITS["file_bytes"] + 65536
         length = dict(scope["headers"]).get(b"content-length")
         if length and int(length) > limit:
             return await JSONResponse({"detail": "Request exceeds file size limit"}, status_code=413)(scope, receive, send)
@@ -42,10 +53,16 @@ class UploadLimit:
 
 
 app.add_middleware(UploadLimit)
+app.add_middleware(BrowserSecurity)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
 
-def get_job(session, job_id):
-    job = session.get(Job, job_id)
+def owner(request):
+    return UUID(request.state.auth["user"]["id"])
+
+
+def get_job(session, job_id, request):
+    job = session.scalar(select(Job).where(Job.id == job_id, Job.owner_id == owner(request)))
     if job is None:
         raise HTTPException(404, "Job not found")
     return job
@@ -55,17 +72,19 @@ def get_job(session, job_id):
 def health():
     with Session() as session:
         session.execute(text("SELECT 1"))
-    return {"status": "ok", "service": "api", "authentication": "planned", "local_only": True}
+    return {"status": "ok", "service": "api", "authentication": "sessions", "local_only": True}
 
 
 @app.get("/api/config")
 def public_config():
     return {"limits": LIMITS, "poll_interval_ms": round(LIMITS["snapshot_interval_seconds"] * 1000),
-            "camera_model": "pinhole_opencv", "scale": "relative", "authentication": "planned"}
+            "camera_model": "pinhole_opencv", "scale": "relative", "authentication": "sessions"}
 
 
 @app.post("/api/jobs", status_code=202)
-async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated[str, Form(max_length=8192)]):
+async def create_job(request: Request, video: Annotated[UploadFile, File()], parameters: Annotated[str, Form(max_length=8192)]):
+    if set(await request.form()) - {"video", "parameters"}:
+        raise HTTPException(422, "Only video and parameters form fields are accepted")
     try:
         params = JobParameters.model_validate_json(parameters)
     except ValidationError as error:
@@ -108,7 +127,7 @@ async def create_job(video: Annotated[UploadFile, File()], parameters: Annotated
                 if pending >= LIMITS["queued_jobs"]:
                     raise HTTPException(429, {"code": "pending_job_limit_reached",
                         "message": "Pending job limit reached", "limit": LIMITS["queued_jobs"], "count": pending})
-                job = Job(id=job_id, owner_id=None, parameters=params.model_dump(), input_ref="input.video")
+                job = Job(id=job_id, owner_id=owner(request), parameters=params.model_dump(), input_ref="input.video")
                 session.add(job)
                 session.flush()
                 return serialize(job)
@@ -132,9 +151,9 @@ def list_jobs(request: Request, page: int = Query(1, ge=1, le=2147483647),
     with Session.begin() as session:
         # Count and items describe one DB snapshot without blocking admission.
         session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
-        total = session.scalar(select(func.count()).select_from(Job))
+        total = session.scalar(select(func.count()).select_from(Job).where(Job.owner_id == owner(request)))
         pages = (total + page_size - 1) // page_size
-        items = [serialize(job) for job in session.scalars(select(Job)
+        items = [serialize(job) for job in session.scalars(select(Job).where(Job.owner_id == owner(request))
             .order_by(Job.created_at.desc(), Job.id.desc()).offset((page-1)*page_size).limit(page_size))]
         return {"items": items, "total": total, "page": page, "page_size": page_size,
                 "total_pages": pages, "has_next": page < pages,
@@ -142,15 +161,15 @@ def list_jobs(request: Request, page: int = Query(1, ge=1, le=2147483647),
 
 
 @app.get("/api/jobs/{job_id}")
-def status(job_id: UUID):
+def status(job_id: UUID, request: Request):
     with Session() as session:
-        return serialize(get_job(session, job_id))
+        return serialize(get_job(session, job_id, request))
 
 
 @app.get("/api/jobs/{job_id}/snapshot")
-def snapshot(job_id: UUID):
+def snapshot(job_id: UUID, request: Request):
     with Session() as session:
-        job = get_job(session, job_id)
+        job = get_job(session, job_id, request)
         value = read_json(job_dir(job_id) / "latest.json")
         if value is None:
             return empty_snapshot() | {"job_id": str(job_id), "server_id": job.server_id, "status": job.status,
@@ -160,9 +179,9 @@ def snapshot(job_id: UUID):
 
 
 @app.get("/api/jobs/{job_id}/result")
-def result(job_id: UUID):
+def result(job_id: UUID, request: Request):
     with Session() as session:
-        job = get_job(session, job_id)
+        job = get_job(session, job_id, request)
         if job.status != "succeeded":
             raise HTTPException(409, {"status": job.status, "error": job.error})
     value = read_json(job_dir(job_id) / "result.json")
@@ -172,11 +191,11 @@ def result(job_id: UUID):
 
 
 @app.get("/api/jobs/{job_id}/artifacts/{name}")
-def artifact(job_id: UUID, name: str):
+def artifact(job_id: UUID, name: str, request: Request):
     if name not in {"trajectory.json", "map_points.json", "snapshots.jsonl", "native-summary.json"}:
         raise HTTPException(404, "Unknown artifact")
     with Session() as session:
-        if get_job(session, job_id).status != "succeeded":
+        if get_job(session, job_id, request).status != "succeeded":
             raise HTTPException(409, "Final result is not ready")
     path = job_dir(job_id) / "native" / name
     if not path.is_file():
@@ -185,9 +204,9 @@ def artifact(job_id: UUID, name: str):
 
 
 @app.get("/api/jobs/{job_id}/frames/{frame_id}")
-def frame(job_id: UUID, frame_id: int):
+def frame(job_id: UUID, frame_id: int, request: Request):
     with Session() as session:
-        job = get_job(session, job_id)
+        job = get_job(session, job_id, request)
         if frame_id < 0 or frame_id >= job.parameters["frames"]:
             raise HTTPException(404, "Frame not found")
     directory = job_dir(job_id)
@@ -199,10 +218,20 @@ def frame(job_id: UUID, frame_id: int):
     return FileResponse(path, media_type="image/png", headers={"X-Frame-Id": str(frame_id)})
 
 
+@app.get("/api/jobs/{job_id}/video")
+def video(job_id: UUID, request: Request):
+    with Session() as session:
+        get_job(session, job_id, request)
+    path = job_dir(job_id) / "input.video"
+    if not path.is_file():
+        raise HTTPException(404, "Source video missing")
+    return FileResponse(path, filename="source.video", media_type="application/octet-stream")
+
+
 @app.post("/api/jobs/{job_id}/cancel", status_code=202)
-def cancel(job_id: UUID):
+def cancel(job_id: UUID, request: Request):
     with Session.begin() as session:
-        job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
+        job = session.scalar(select(Job).where(Job.id == job_id, Job.owner_id == owner(request)).with_for_update())
         if job is None:
             raise HTTPException(404, "Job not found")
         if job.status not in TERMINAL:

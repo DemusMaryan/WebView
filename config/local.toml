@@ -1,4 +1,4 @@
-# Native WSL only. All listeners are loopback; this prototype has no authentication.
+# Native WSL only. HTTP cookies are explicitly development-only on loopback.
 [paths]
 cv_root = "~/.local/share/monotrajectoryweb"
 data_root = "~/.local/share/monotrajectoryweb/web"
@@ -29,3 +29,9 @@ snapshot_interval_seconds = 0.5
 backing_mount = "/mnt/c"
 native_reserve_bytes = 2147483648
 backing_reserve_bytes = 5368709120
+
+[auth]
+cookie_mode = "localhost-http"
+allowed_origins = ["http://127.0.0.1:8080", "http://localhost:8080"]
+session_seconds = 28800
+preauth_seconds = 600

@@ -597,3 +597,10 @@ footer {
     max-height:260px;
   }
 }
+.auth-page { min-height:100vh; display:grid; place-items:center; padding:24px; }
+.auth-card { width:min(440px, 100%); }
+.auth-card form { display:grid; gap:10px; margin-bottom:16px; }
+.auth-card .brand { display:block; margin-bottom:24px; }
+.account { display:flex; align-items:center; gap:12px; }
+.current-user { font-size:14px; font-weight:600; }
+.auth-error { margin:12px 24px; }

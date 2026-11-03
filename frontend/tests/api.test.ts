@@ -1,6 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ApiError, json } from '../src/api.ts';
+import { ApiError, json, setCsrf } from '../src/api.ts';
+
+test('mutations send the in-memory CSRF header, reads do not, logout handles 204', async () => {
+  const original = globalThis.fetch;
+  const csrf = 'unit-fixture-not-a-session-credential';
+  const seen: RequestInit[] = [];
+  globalThis.fetch = async (_url, options) => {
+    seen.push(options!);
+    return options?.method === 'POST' ? new Response(null, { status: 204 }) : Response.json({ ok: true });
+  };
+  try {
+    setCsrf(csrf);
+    await json('/api/config');
+    assert.equal(await json('/api/auth/logout', { method: 'POST' }), undefined);
+    assert.equal(new Headers(seen[0].headers).has('X-CSRF-Token'), false);
+    assert.equal(new Headers(seen[1].headers).get('X-CSRF-Token'), csrf);
+    assert.equal(seen[1].credentials, 'same-origin');
+  } finally { setCsrf(null); globalThis.fetch = original; }
+});
 
 test('stored limit keeps its machine code and gives an understandable message', async () => {
   const original = globalThis.fetch;

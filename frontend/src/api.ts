@@ -1,5 +1,8 @@
 import type { FinalData, Manifest, Point, Pose, Snapshot } from './types';
 
+let csrf: string | null = null;
+export const setCsrf = (value: string | null) => { csrf = value; };
+
 export class ApiError extends Error {
   status: number;
   code: string | null;
@@ -9,7 +12,9 @@ export class ApiError extends Error {
 }
 
 export async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store', ...options });
+  const headers = new Headers(options.headers);
+  if (!['GET', 'HEAD', 'OPTIONS'].includes((options.method ?? 'GET').toUpperCase()) && csrf) headers.set('X-CSRF-Token', csrf);
+  const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...options, headers });
   if (!response.ok) {
     const text = await response.text();
     let message = text;
@@ -27,9 +32,10 @@ export async function json<T>(url: string, options: RequestInit = {}): Promise<T
       }
     } catch { /* Nginx may return a short HTML body, e.g. HTTP 413. */ }
     if (response.status === 413) message = 'Файл або тіло запиту перевищує дозволений розмір.';
+    if (response.status === 401 && !url.startsWith('/api/auth/') && typeof window !== 'undefined') window.dispatchEvent(new Event('mtw-auth-expired'));
     throw new ApiError(response.status, code, `HTTP ${response.status}: ${message.slice(0, 1600)}`);
   }
-  return response.json();
+  return response.status === 204 ? undefined as T : response.json();
 }
 
 export async function loadFrame(snapshot: Snapshot, signal: AbortSignal): Promise<string | null> {

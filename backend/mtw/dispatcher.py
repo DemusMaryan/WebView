@@ -4,6 +4,7 @@ import signal
 import httpx
 from .config import PORTS
 from .scheduler import outstanding, reserve_next, still_reserved
+from .service_auth import service_headers
 
 
 async def deliver(client, reservation, stop):
@@ -11,7 +12,7 @@ async def deliver(client, reservation, stop):
     while not stop.is_set() and still_reserved(reservation):
         try:
             response = await client.post(f"http://127.0.0.1:{PORTS['balancer']}/execute",
-                json=reservation, headers={"X-MTW-Job": reservation["job_id"]})
+                json=reservation, headers=service_headers() | {"X-MTW-Job": reservation["job_id"]})
             print(f"handoff job_id={reservation['job_id']} via=nginx:{PORTS['balancer']} "
                   f"http={response.status_code} body={response.text[:300]}", flush=True)
             if response.status_code not in (200, 202, 409, 502, 503, 504):
