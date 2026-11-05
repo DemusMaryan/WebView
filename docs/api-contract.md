@@ -1,6 +1,6 @@
 # Поточний локальний API: задачі та історія
 
-Контракт Промптів 7–10, перевірено 03.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність, TLS 1.2/1.3 і queue ETA реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Авторизація](authentication.md), [TLS і ручна довіра CA](https.md), [черга, ETA й докази](queue-eta.md).
+Контракт Промптів 7–11, оновлено 05.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність, TLS 1.2/1.3 і queue ETA реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Авторизація](authentication.md), [TLS і ручна довіра CA](https.md), [черга, ETA й докази](queue-eta.md).
 
 HTTP:8080 GET/HEAD повертає 308 на canonical HTTPS зі збереженням path/query; інші методи — 426 без проксіювання user API. Прямий HTTP `/api/*` на приватному API:8000 повертає 400 `https_required`, також із підробленим forwarding. Довіряємо forwarded headers тільки від налаштованого loopback proxy з приватним X-MTW-Proxy-Key; Uvicorn proxy_headers=False. Host/Origin — canonical IP та порт 8443; localhost:8443 має валідний SAN і перенаправляється на canonical URL. Немає CORS. Сертифікати поза Git; curl використовує явний `--cacert`, системну довіру не встановлено.
 
@@ -89,6 +89,8 @@ wsl -d Ubuntu --exec curl --cacert /home/demus/.local/share/monotrajectoryweb/we
 У Промпті 8 всі ці маршрути перевіряють власника; video додано як захищений attachment. На compute /execute і /health потрібен приватний X-MTW-Service-Key, також при прямому зверненні. Браузерна сесія його не замінює. Ключ не видається користувачам, dispatcher/control читають його з native файла 0600. [R5 і cancel/timeout isolation](parallel-processing.md) залишаються окремими доказами; CV не змінювався.
 
 ## Позиція черги та ETA — Промпт 10
+
+Промпт 11 змінює capacity на кількість fresh-ready registry (base2/max3); starting/stopped/failed/stale сервер не створює додаткового слота. Реальна перевірка R6 двох слотів збережена; R7 автоматично додав третій контейнерний слот через Nginx, усі чотири результати сценарію валідні. `worker_pid_scope` у metadata пояснює PID: `host` для native baseline, `container:compute-3` для третього. PID compute-3 не можна трактувати як host PID; mapping міститься тільки в операторських доказах. Нових публічних службових/admin endpoints немає. [Команди та докази R7](autoscaling.md).
 
 `GET /api/jobs/{own_id}` для готової до запуску queued-задачі додає:
 
