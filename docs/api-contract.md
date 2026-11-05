@@ -1,10 +1,12 @@
 # Поточний локальний API: задачі та історія
 
-Контракт Промптів 7–11, оновлено 05.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність, TLS 1.2/1.3 і queue ETA реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Авторизація](authentication.md), [TLS і ручна довіра CA](https.md), [черга, ETA й докази](queue-eta.md).
+Контракт Промптів 7–12, оновлено 05.11.2026. Вхід через Nginx: **https://127.0.0.1:8443**. Усі адреси нижче відносні. Прототип локальний: облікові записи, PostgreSQL sessions, власність, TLS 1.2/1.3, queue ETA та read-only admin monitoring реалізовані; персональні квоти заплановані. Історичні відповіді Промпта 3 не замінюють цей контракт. [Авторизація](authentication.md), [TLS і ручна довіра CA](https.md), [черга, ETA й докази](queue-eta.md), [admin monitoring](admin-monitoring.md).
 
 HTTP:8080 GET/HEAD повертає 308 на canonical HTTPS зі збереженням path/query; інші методи — 426 без проксіювання user API. Прямий HTTP `/api/*` на приватному API:8000 повертає 400 `https_required`, також із підробленим forwarding. Довіряємо forwarded headers тільки від налаштованого loopback proxy з приватним X-MTW-Proxy-Key; Uvicorn proxy_headers=False. Host/Origin — canonical IP та порт 8443; localhost:8443 має валідний SAN і перенаправляється на canonical URL. Немає CORS. Сертифікати поза Git; curl використовує явний `--cacert`, системну довіру не встановлено.
 
 ## Авторизація
+
+`user` у bootstrap/me/register/login містить `id`, `login`, **is_admin:boolean**. Нові/наявні користувачі default false; роль тільки через локальну CLI, жодного role-write API. Role/is_admin у register або video parameters відхиляються422. Роль перечитується при кожному запиті; власність звичайних маршрутів збережена також для admin.
 
 | Запит | Контракт |
 | --- | --- |
@@ -16,7 +18,15 @@ HTTP:8080 GET/HEAD повертає 308 на canonical HTTPS зі збереже
 
 Bootstrap доступний без входу, jobs/config та всі їхні підмаршрути потребують входу. Без нього 401 `authentication_required`; чужий або unowned job — 404. Для всіх API mutations, включно з register/login/logout, потрібні Origin `https://127.0.0.1:8443` та X-CSRF-Token з bootstrap/входу поточної сесії; порушення — 403 `csrf_rejected`. Не передавати секрети в URL. Cookies **Secure/HttpOnly/SameSite=Strict**, cookie_mode=https; bootstrap оновлює старий dev-cookie без продовження строку БД. Auth validation errors не повертають password/input. Файлові відповіді захищені тим самим owner check, private/no-store. Preview/video/artifact URL відносні до HTTPS origin, без mixed content.
 
-## Ліміти та створення
+## Панель адміністратора
+
+GET `/admin` та `/admin/` — захищений HTML entry; GET `/api/admin/monitoring` — bounded read-only snapshot. Через HTTPS: без входу401 authentication_required, без ролі403 admin_required; авторизований admin200. HTTP fallback немає. GET повертає `status=available|stale|unavailable`, `stale`, `sampled_at`, `age_seconds`, `environment`, `services`, `servers`, `capacity`, `queue`, `processes`, count/truncation flags та units. Cache source interval2с, stale_after6с; max256 process rows/256KiB cache, queue10/servers3. Немає повної геометрії, JSONL, argv/environment або credential полів.
+
+Process: `host_pid`, `pid` (NSpid), `pid_scope`, `pid_namespace`, `role`, `service`, nullable server_id/job_id, kernel state, elapsed_seconds, cpu_percent/null, cpu_ticks/cpu_seconds, rss_bytes/null, metrics_status. CPU100%=один logical CPU; WSL environment CPU100%=всі CPU. Memory bytes; RSS спільні сторінки не підсумовуються як окремі машини. Server: registry state/freshness і health окремо, slot_limit1/slot_used, current job/state/frame progress. Queue: job_id/state/queue_position/estimated_wait_seconds, без password/owner credentials. Dispatching/running не є queued: глобальна active capacity включає reservations, server slot показує вже призначений server_id.
+
+Якщо collector або джерело недоступні, stale/unavailable/null показані явно, без підстановки нуля. UI зберігає останні дані з попередженням. Дані sampled, дуже короткі процеси можуть не потрапити між samples. Роль не дозволяє читати чужі artifacts або cancel через звичайні маршрути. Моніторинг не має mutation endpoints. [Джерела, приклади й докази](admin-monitoring.md).
+
+## Ліміти та створення задач
 
 `GET /api/config` повертає `limits`, `poll_interval_ms`, `camera_model`, `scale` та `authentication`. У `config/local.toml`, секція `[limits]`:
 
