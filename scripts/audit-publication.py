@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 import subprocess
 
+CERTIFICATE_PAYLOAD = rb'-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]{64,}-----END CERTIFICATE-----'
+
 
 def git(*args):
     return subprocess.check_output(['git',*args])
@@ -31,7 +33,7 @@ def audit(base):
     offset=0;findings=[];large=[]
     patterns={
         'private_key_header':rb'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----',
-        'certificate_payload':rb'-----BEGIN CERTIFICATE-----',
+        'certificate_payload':CERTIFICATE_PAYLOAD,
         'credential_in_database_url':rb'postgres(?:ql)?(?:\+psycopg)?://[^\s/:]+:[^\s/@]+@',
         'github_token':rb'\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b',
         'provider_token':rb'\b(?:AKIA[0-9A-Z]{16}|sk-(?:proj-)?[A-Za-z0-9_-]{35,})\b',

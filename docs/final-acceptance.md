@@ -196,9 +196,11 @@ wsl -d Ubuntu --exec bash scripts/assign-unowned --login EXISTING_LOGIN --all-un
 
 ## Git і ручна публікація
 
-Read-only `git ls-remote target refs/heads/main` підтвердив remote main **faa98ba6984b1af24ccaf7c65ae81b7c8564f3ce**; локальний `target/main` збігається. Для аудиту використано цей актуальний base, не застарілий remote ref. До Промпта13 було22 неопублікованих коміти; завершені перевірки — **ce3449c**. Підсумкова документація додає ще один локальний коміт. Точний кінцевий40-символьний HEAD наводиться у фінальному повідомленні й native `publication.json`, щоб не створювати самопосилальний SHA у власному коміті.
+Read-only `git ls-remote target refs/heads/main` підтвердив remote main **faa98ba6984b1af24ccaf7c65ae81b7c8564f3ce**; локальний `target/main` збігається. Для аудиту використано цей актуальний base, не застарілий remote ref. До Промпта13 було22 неопублікованих коміти; завершені перевірки — **ce3449c**, підсумкова документація — **54d9ac0**. Окремий наступний fix уточнив audit rule, без переписування історії. Точний кінцевий40-символьний HEAD наводиться у фінальному повідомленні й native `publication.json`, щоб не створювати самопосилальний SHA у власному коміті.
 
 `scripts/audit-publication.py` перевіряє **кожну версію blob у кожному tree** `target/main..HEAD`, filenames/вміст на private-key/certificate payload, credential URLs/provider tokens, БД/відео/build signatures, файли>1MiB, авторів і комітерів. Значення збігів не друкує. Початковий audit22 commits/299unique blobs: findings0, >1MiB0; найбільший blob475034 bytes — підготовлена `docs/figures/cv-trajectory.png`. Остаточний audit після docs commit збережений у `publication.json`; findings мають залишатися порожніми. Це цільова перевірка, не математична гарантія від довільних секретів. Всі перевірені author/committer — versal217 <versaldata@gmail.com>.
+
+Перший audit24 commits помилково позначив **`scripts/audit-publication.py` у ce3449c**: власний literal header правила, без certificate payload. Це вручну перевірене хибне спрацювання, не витік. Правило уточнено: вимагає multiline base64 body та end marker. Два цільові `test_publication_audit` methods (source literal не спрацьовує / runtime-generated payload спрацьовує) пройшли,0,001с. Повторний аудит усіх попередніх версій24 commits має findings0; початковий результат збережено `publication-initial.json`, уточнений — `publication-reviewed.json`, остаточний після fix commit — `publication.json`. Жоден старий коміт не змінено.
 
 ```powershell
 git status --short
