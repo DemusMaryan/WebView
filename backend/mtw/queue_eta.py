@@ -8,6 +8,7 @@ from sqlalchemy import select
 from .config import CONFIG
 from .db import Job, now
 from .scheduler import ACTIVE, MAX_ACTIVE
+from .servers import ready_servers
 
 SETTINGS = CONFIG["queue"]
 
@@ -78,9 +79,10 @@ def estimate_queue(session, target, at=None):
         return value if positive(value) else None
 
     active = list(session.scalars(select(Job).where(Job.status.in_(ACTIVE))))
-    if len(active) > MAX_ACTIVE:
+    capacity = min(MAX_ACTIVE,len(ready_servers(session,at)))
+    if not capacity or len(active) > capacity:
         return {"queue_position": position, "estimated_wait_seconds": None}
-    slots = [0.0] * (MAX_ACTIVE - len(active))
+    slots = [0.0] * (capacity - len(active))
     for job in active:
         predicted = duration(job)
         elapsed = max(0, (at - job.started_at).total_seconds()) if job.started_at else 0

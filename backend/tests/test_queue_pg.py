@@ -16,6 +16,7 @@ from mtw import api, auth, queue_eta
 from mtw.config import database_url
 from mtw.db import Base, Job, User, AuthSession, now
 from mtw.scheduler import reserve_next
+from mtw.servers import seed_test_baseline
 
 
 @unittest.skipUnless(os.environ.get("MTW_POSTGRES_TESTS") == "1", "Opt-in isolated PostgreSQL tests")
@@ -40,8 +41,9 @@ class QueuePostgresTests(unittest.TestCase):
 
     def setUp(self):
         with self.sessions.begin() as s:
-            for table in ("jobs", "auth_sessions", "users"):
+            for table in ("jobs", "auth_sessions", "users", "compute_servers"):
                 s.execute(text(f"DELETE FROM {table}"))
+            seed_test_baseline(s)
         self.at = now()
         self.enterContext(patch.dict(queue_eta.SETTINGS, initial_seconds=40, reference_frames=360,
             reference_width=640, reference_height=480, history_samples=30))

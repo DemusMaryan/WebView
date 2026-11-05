@@ -1,11 +1,11 @@
-"""PostgreSQL is authoritative for the two global execution reservations."""
+"""PostgreSQL reserves work against fresh ready slots, bounded at three."""
 from uuid import uuid4
 from sqlalchemy import func, select, text
 from .db import Job, Session, now
+from .servers import SERVERS, ready_servers
 
 ACTIVE = ("dispatching", "running")
-MAX_ACTIVE = 2
-SERVERS = ("compute-1", "compute-2")
+MAX_ACTIVE = 3
 
 
 def reserve_next(session_factory=Session):
@@ -13,7 +13,7 @@ def reserve_next(session_factory=Session):
         # Serialize count + claim across every dispatcher process/loop.
         session.execute(text("SELECT pg_advisory_xact_lock(7132103)"))
         count = session.scalar(select(func.count()).select_from(Job).where(Job.status.in_(ACTIVE)))
-        if count >= MAX_ACTIVE:
+        if count >= min(MAX_ACTIVE,len(ready_servers(session))):
             return None
         job = session.scalar(select(Job).where(Job.status == "queued", Job.cancel_requested.is_(False))
                              .order_by(Job.created_at, Job.id).with_for_update().limit(1))

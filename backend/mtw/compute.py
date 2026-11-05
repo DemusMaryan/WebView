@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
+from pathlib import Path
 import sys
 import time
 from uuid import UUID
@@ -10,8 +11,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
-from .config import REPO, job_dir
-from .db import Job, Session, engine, now
+from .config import REPO, CV_ROOT, DATA, job_dir
+from .db import ComputeServer, Job, Session, engine, now
 from .files import atomic_json, read_json
 from .processes import identity, members, group_processes, reap_group, subreaper, terminate_group
 from .capacity import ensure_space
@@ -76,7 +77,18 @@ class Execution(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "server_id": SERVER_ID, "busy": slot.locked(), "active_job": active}
+    isolation={}
+    if SERVER_ID=='compute-3':
+        isolation={'root_read_only':bool(os.statvfs('/').f_flag & os.ST_RDONLY),
+            'repository_read_only':bool(os.statvfs(REPO).f_flag & os.ST_RDONLY),
+            'core_read_only':bool(os.statvfs(CV_ROOT/'build/exporter').f_flag & os.ST_RDONLY),
+            'jobs_writable':not bool(os.statvfs(DATA/'jobs').f_flag & os.ST_RDONLY),
+            'host_only_marker_visible':(CV_ROOT/'containers/host-only-marker').exists(),
+            'uid':os.getuid(), 'no_new_privileges':next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('NoNewPrivs:'))}
+    return {"status": "ok", "server_id": SERVER_ID, "busy": slot.locked(), "active_job": active,
+            'isolation':isolation,
+            "pid":os.getpid(),"pid_namespace":os.readlink('/proc/self/ns/pid'),
+            "mount_namespace":os.readlink('/proc/self/ns/mnt')}
 
 
 def accepted(job, duplicate=False):
@@ -97,6 +109,10 @@ async def execute(request: Execution):
                 return accepted(job, duplicate=True)
             if job.status != "dispatching":
                 raise HTTPException(409, "Job has already been started or finished")
+            if SERVER_ID == "compute-3":
+                registry = session.get(ComputeServer,SERVER_ID)
+                if registry is None or registry.state != "ready":
+                    raise HTTPException(409,"Container is not ready in the load balancer")
             if slot.locked():
                 raise HTTPException(409, "Compute slot is occupied; retry same reservation")
             if job.cancel_requested:

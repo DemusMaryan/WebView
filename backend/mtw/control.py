@@ -24,7 +24,7 @@ PG_BIN = Path("/usr/lib/postgresql/16/bin")
 NGINX = Path("/usr/sbin/nginx")
 PGDATA = DATA / "pgdata"
 SOCKET = DATA / "pgsocket"
-NAMES = ("api", "compute-1", "compute-2", "nginx", "dispatcher")
+NAMES = ("api", "compute-1", "compute-2", "nginx", "autoscaler", "dispatcher")
 
 
 def command(argv, **kwargs):
@@ -111,12 +111,40 @@ def setup():
     print(json.dumps({"setup": "ready", "data_root": str(DATA), "postgres_port": PORTS["postgres"]}))
 
 
-def write_nginx():
+def write_nginx(add_server=None, exclude=()):
+    owner=DATA.stat()
+    if os.getuid()==0 and owner.st_uid!=0:
+        # TLS/proxy credentials remain owned by the application user. Keep their
+        # ownership validation intact instead of making root an accepted owner.
+        env=os.environ.copy()
+        env.update(PYTHONPATH=str(REPO/'backend'),MTW_CONFIG=str(CONFIG_PATH))
+        command([sys.executable,'-c',
+            'import json,sys; from mtw.control import write_nginx; write_nginx(**json.loads(sys.argv[1]))',
+            json.dumps({'add_server':add_server,'exclude':list(exclude)})],
+            user=owner.st_uid,group=owner.st_gid,extra_groups=[],env=env,cwd=REPO,timeout=30)
+        return
+    prefix=DATA/'nginx'
+    prefix.mkdir(exist_ok=True)
+    lock_path=prefix/'render.lock'
+    with lock_path.open('a') as lock:
+        if os.getuid()==0: os.chown(lock_path,DATA.stat().st_uid,DATA.stat().st_gid)
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        return _write_nginx(add_server,exclude)
+
+
+def _write_nginx(add_server,exclude):
     tls.validate()  # Never render or reload an HTTP fallback for missing/invalid TLS.
     origin = tls.canonical_origin()
     authority = origin.removeprefix("https://")
     certificates = tls.paths()
     forwarding_key = proxy_key()
+    from .db import ComputeServer,Session
+    from .servers import ready_servers
+    with Session() as session:
+        extra=session.get(ComputeServer,'compute-3')
+        include_extra=extra is not None and 'compute-3' in ready_servers(session)
+    include_extra=(include_extra or add_server=='compute-3') and 'compute-3' not in exclude
+    extra_upstream=f"        server 127.0.0.1:{PORTS['compute_3']};\n" if include_extra else ''
     prefix = DATA / "nginx"
     prefix.mkdir(exist_ok=True)
     prefix.chmod(0o700)
@@ -142,7 +170,7 @@ http {{
     upstream computes {{
         server 127.0.0.1:{PORTS['compute_1']};
         server 127.0.0.1:{PORTS['compute_2']};
-    }}
+{extra_upstream}    }}
     server {{
         listen 127.0.0.1:{PORTS['entry']};
         if ($request_method !~ ^(GET|HEAD)$) {{ return 426; }}
@@ -193,6 +221,7 @@ http {{
     with open(candidate, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as target:
         target.write(config)
     candidate.chmod(0o600)  # Contains only the private forwarding key, never logged.
+    if os.getuid()==0: os.chown(candidate,DATA.stat().st_uid,DATA.stat().st_gid)
     command([NGINX, "-t", "-p", str(prefix) + "/", "-c", candidate.name], stdout=subprocess.DEVNULL)
     os.replace(candidate, prefix / "nginx.conf")
     master = owned("nginx")
@@ -202,6 +231,9 @@ http {{
 
 def launch(name):
     if owned(name):
+        return
+    if name=='autoscaler':
+        root_action('start')
         return
     if name == "nginx" and (DATA / "nginx/nginx.pid").exists():
         # Recover a master started just before an interrupted controller wrote its PID record.
@@ -269,6 +301,9 @@ def start(names):
 
 
 def stop_one(name):
+    if name=='autoscaler':
+        root_action('stop')
+        return
     item = owned(name)
     if not item:
         return
@@ -283,6 +318,8 @@ def stop_one(name):
 def stop(names):
     if "dispatcher" in names:
         stop_one("dispatcher")
+    if 'autoscaler' in names:
+        stop_one('autoscaler')
     # Request cancellation before stopping computes; their normal manager reaps the group.
     if any(name.startswith("compute-") for name in names):
         from .db import Job, Session
@@ -299,8 +336,15 @@ def stop(names):
         if jobs:
             raise RuntimeError("Compute did not acknowledge cancellation; leave services running for inspection")
     for name in reversed(names):
-        if name != "dispatcher":
+        if name not in ("dispatcher","autoscaler"):
             stop_one(name)
+    if any(name.startswith('compute-') for name in names):
+        from .db import ComputeServer,Session
+        with Session.begin() as session:
+            for name in names:
+                if name.startswith('compute-'):
+                    row=session.get(ComputeServer,name)
+                    if row: row.state,row.heartbeat_at='stopped',None
     print(json.dumps({"stopped": list(names), "database_preserved": True}))
 
 
@@ -319,6 +363,16 @@ def status():
         except (OSError, RuntimeError):
             result["services"][name]["health_error"] = "Private service credential unavailable; run scripts/start"
     try:
+        from .db import ComputeServer,Session
+        from .servers import ready_servers
+        from sqlalchemy import select
+        with Session() as s:
+            result['compute_capacity']={'ready':len(ready_servers(s)),'maximum':3,'base':2,
+                'servers':[{'server_id':r.server_id,'kind':r.kind,'state':r.state,'attempts':r.attempts,'error':r.error,
+                            'process':r.process} for r in s.scalars(select(ComputeServer).order_by(ComputeServer.server_id))]}
+    except Exception:
+        result['compute_capacity']={'error':'Compute registry unavailable; apply scripts/migrate before service reload'}
+    try:
         result["https"] = tls.validate()
         context = ssl.create_default_context(cafile=tls.paths()["ca_cert"])
         response = httpx.get(tls.canonical_origin() + "/health", verify=context, timeout=2, trust_env=False)
@@ -326,6 +380,14 @@ def status():
     except (ValueError, OSError, httpx.HTTPError) as error:
         result["https"] = {"valid": False, "error": str(error), "http_fallback": False}
     print(json.dumps(result, indent=2))
+
+
+def root_action(action):
+    if os.getuid()==0:
+        command([sys.executable,'-m','mtw.autoscaler',action])
+    else:
+        command(['/mnt/c/Windows/System32/wsl.exe','-d','Ubuntu','-u','root','--exec','env',
+            f'MTW_CONFIG={CONFIG_PATH}','bash',str(REPO/'scripts/autoscaler'),action],timeout=50)
 
 
 def main():

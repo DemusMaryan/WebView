@@ -1,4 +1,4 @@
-"""Concurrent, restart-safe handoff of two PostgreSQL reservations via Nginx."""
+"""Concurrent, restart-safe handoff of PostgreSQL reservations via Nginx."""
 import asyncio
 import signal
 import httpx

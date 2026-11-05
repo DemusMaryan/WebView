@@ -11,6 +11,7 @@ https = 8443
 balancer = 8081
 compute_1 = 8101
 compute_2 = 8102
+compute_3 = 8103
 
 [limits]
 file_bytes = 67108864
@@ -48,3 +49,13 @@ reference_frames = 360
 reference_width = 640
 reference_height = 480
 history_samples = 30
+
+[autoscale]
+enabled = true
+base_servers = 2
+max_servers = 3
+startup_seconds = 25.0
+retry_seconds = 30.0
+max_start_attempts = 2
+health_interval_seconds = 1.0
+heartbeat_seconds = 15.0

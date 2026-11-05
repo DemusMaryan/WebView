@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, create_engine, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import database_url
@@ -29,6 +29,23 @@ class AuthSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ComputeServer(Base):
+    __tablename__ = "compute_servers"
+    __table_args__ = (CheckConstraint("server_id IN ('compute-1','compute-2','compute-3')",name="ck_compute_server_ids"),
+        CheckConstraint("state IN ('stopped','starting','ready','failed','stopping')",name="ck_compute_server_states"))
+    server_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    state: Mapped[str] = mapped_column(String(16), default="stopped")
+    launch_token: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    process: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 class Job(Base):
@@ -73,4 +90,5 @@ def serialize(job):
             for key, value in values.items()} | {
         "parameters": job.parameters, "has_result": job.result_ref is not None,
         "has_snapshot": job.snapshot_ref is not None, "eta_seconds": None,
+        "worker_pid_scope": "container:compute-3" if job.server_id == "compute-3" else "host",
         "queue_position": None, "estimated_wait_seconds": None}

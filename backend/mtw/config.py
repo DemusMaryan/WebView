@@ -5,8 +5,14 @@ import tomllib
 REPO = Path(__file__).resolve().parents[2]
 CONFIG_PATH = Path(os.environ.get("MTW_CONFIG", REPO / "config/local.toml")).resolve()
 CONFIG = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-CV_ROOT = Path(CONFIG["paths"]["cv_root"]).expanduser().resolve()
-DATA = Path(CONFIG["paths"]["data_root"]).expanduser().resolve()
+def runtime_path(value):
+    if value.startswith('~/') and os.environ.get('MTW_RUNTIME_HOME'):
+        return (Path(os.environ['MTW_RUNTIME_HOME'])/value[2:]).resolve()
+    return Path(value).expanduser().resolve()
+
+
+CV_ROOT = runtime_path(CONFIG["paths"]["cv_root"])
+DATA = runtime_path(CONFIG["paths"]["data_root"])
 if any(str(p).startswith("/mnt/") or p == Path("/") for p in (CV_ROOT, DATA)):
     raise RuntimeError("Runtime data must be on the native WSL filesystem")
 PORTS = CONFIG["ports"]

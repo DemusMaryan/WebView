@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from mtw.config import database_url
 from mtw.db import Base, Job
 from mtw.scheduler import outstanding, reserve_next, still_reserved
+from mtw.servers import seed_test_baseline
 
 
 @unittest.skipUnless(os.environ.get("MTW_POSTGRES_TESTS") == "1", "Opt-in isolated PostgreSQL tests")
@@ -36,6 +37,8 @@ class SchedulerPostgresTests(unittest.TestCase):
     def setUp(self):
         with self.sessions.begin() as s:
             s.execute(text("DELETE FROM jobs"))
+            s.execute(text("DELETE FROM compute_servers"))
+            seed_test_baseline(s)
             for _ in range(3):
                 s.add(Job(parameters={}, input_ref="test-only"))
 

@@ -6,7 +6,7 @@ from .config import PORTS
 name = sys.argv[1]
 if name == "api":
     target, port = "mtw.api:app", PORTS["api"]
-elif name in ("compute-1", "compute-2"):
+elif name in ("compute-1", "compute-2", "compute-3"):
     os.environ["MTW_SERVER_ID"] = name
     target, port = "mtw.compute:app", PORTS[name.replace("-", "_")]
 else:

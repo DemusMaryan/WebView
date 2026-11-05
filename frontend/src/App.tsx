@@ -190,6 +190,6 @@ function Workspace({ user, logout }: { user: User; logout: () => Promise<void> }
           </>}
       </div>
     </main>
-    <footer>HTTPS · тільки localhost · сесії та власність задач · до двох задач одночасно</footer>
+    <footer>HTTPS · тільки localhost · сесії та власність задач · 2 базові сервери, максимум 3</footer>
   </>;
 }
