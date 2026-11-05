@@ -15,6 +15,8 @@
 
 ## Тема та межі
 
+- Промпт13 завершено06.11.2026: `docs/final-acceptance.md` містить точні R1–R8, докази й demo; `docs/how-it-works.md` оновлено до HTTPS/auth/ready3/R6–R8 і5–7хв захисту. R1 закрито21 distinct methods із цільовим повтором одного виправленого fixture; справжні decode child failures без SLAM, timeout reuse через AST/source match із dafba89. Єдиний new UI job4c718f50-153f-4c61-a33e-f4ce8ce42a94, compute1:300frames/live252/final226/points2695,32,205с worker incl decode/pacing/export, truncation=false. HTTPS login/upload/live canvas snapshots8/47/86/result/history/reload/full PG+services restart/logout успішні; всі72 попередні rows/owner/file signatures/users/core5/R5–R8 proof hashes збережені, тепер73. Admins0, legacy51 ownerNULL; CA не імпортовано, Chrome ERR_CERT_AUTHORITY_INVALID, functional ignoreHTTPSErrors=true, curl CA verify0. Production/CV/dependencies/ABI/shutdown не змінювалися. R7 58 vs R8 56 — різні modules: shared47, R7-only history7/container-stop4, R8-only admin5/metrics4; не падіння тестів. Read-only audit кожного blob version у неопублікованих commits; secrets/media/DB/build не публікувати. Користувацькі prompt replacement і Release лишити поза комітами. Резерв5GiB чинний; RAM/commit info only. Наступних функціональних етапів без нового запиту не починай.
+
 Користувач завантажує записане монокулярне відео. Backend послідовно обробляє кадри, зберігає результати й надає справжні проміжні оцінки траєкторії камери та розріджених 3D-точок. Масштаб відносний; без зовнішнього масштабу координати не можна називати метрами.
 
 Живий відеопотік, повторна локалізація у збереженій кімнаті та щільна фотореалістична модель не входять у тему.
