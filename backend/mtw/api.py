@@ -20,9 +20,11 @@ from .frame_work import POLICY, cleanup_decoded_frames
 from .auth import BrowserSecurity, router as auth_router
 from .proxy import TrustedTLSProxy
 from .queue_eta import estimate_queue, probe_video
+from .admin import router as admin_router
 
 app = FastAPI(title="MonoTrajectoryWeb local API", version="0.8.0")
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 @app.exception_handler(RequestValidationError)

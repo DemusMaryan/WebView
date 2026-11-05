@@ -24,7 +24,7 @@ PG_BIN = Path("/usr/lib/postgresql/16/bin")
 NGINX = Path("/usr/sbin/nginx")
 PGDATA = DATA / "pgdata"
 SOCKET = DATA / "pgsocket"
-NAMES = ("api", "compute-1", "compute-2", "nginx", "autoscaler", "dispatcher")
+NAMES = ("api", "compute-1", "compute-2", "nginx", "monitor", "autoscaler", "dispatcher")
 
 
 def command(argv, **kwargs):
@@ -192,6 +192,14 @@ http {{
             proxy_read_timeout 30s;
             proxy_request_buffering off;
         }}
+        location ~ ^/admin/?$ {{
+            proxy_pass http://127.0.0.1:{PORTS['api']};
+            proxy_set_header Host "{authority}";
+            proxy_set_header X-Forwarded-Host "{authority}";
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-MTW-Proxy-Key "{forwarding_key}";
+            proxy_read_timeout 5s;
+        }}
         location = /health {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
         location = /openapi.json {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
         location = /docs {{ proxy_pass http://127.0.0.1:{PORTS['api']}; }}
@@ -232,8 +240,8 @@ http {{
 def launch(name):
     if owned(name):
         return
-    if name=='autoscaler':
-        root_action('start')
+    if name in {'autoscaler','monitor'}:
+        root_action('start',name)
         return
     if name == "nginx" and (DATA / "nginx/nginx.pid").exists():
         # Recover a master started just before an interrupted controller wrote its PID record.
@@ -301,8 +309,8 @@ def start(names):
 
 
 def stop_one(name):
-    if name=='autoscaler':
-        root_action('stop')
+    if name in {'autoscaler','monitor'}:
+        root_action('stop',name)
         return
     item = owned(name)
     if not item:
@@ -382,12 +390,13 @@ def status():
     print(json.dumps(result, indent=2))
 
 
-def root_action(action):
+def root_action(action,service='autoscaler'):
+    if service not in {'autoscaler','monitor'}: raise ValueError('Unknown project root service')
     if os.getuid()==0:
-        command([sys.executable,'-m','mtw.autoscaler',action])
+        command([sys.executable,'-m','mtw.'+('monitoring' if service=='monitor' else 'autoscaler'),action])
     else:
         command(['/mnt/c/Windows/System32/wsl.exe','-d','Ubuntu','-u','root','--exec','env',
-            f'MTW_CONFIG={CONFIG_PATH}','bash',str(REPO/'scripts/autoscaler'),action],timeout=50)
+            f'MTW_CONFIG={CONFIG_PATH}','bash',str(REPO/'scripts'/service),action],timeout=50)
 
 
 def main():

@@ -604,3 +604,10 @@ footer {
 .account { display:flex; align-items:center; gap:12px; }
 .current-user { font-size:14px; font-weight:600; }
 .auth-error { margin:12px 24px; }
+/* Read-only admin tables share the existing card layout. */
+.admin-layout { display: grid; gap: 1rem; padding: 1.5rem; max-width: 1560px; margin: auto; }
+.admin-layout .table-scroll { overflow-x: auto; }
+.admin-layout table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.admin-layout th, .admin-layout td { text-align: left; padding: .7rem; border-bottom: 1px solid #dce3e8; vertical-align: top; }
+.admin-layout td small { display: block; color: #526574; margin-top: .3rem; overflow-wrap: anywhere; }
+.admin-layout code { overflow-wrap: anywhere; }

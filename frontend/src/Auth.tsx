@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, json, setCsrf } from './api';
 
-export type User = { id: string; login: string };
+export type User = { id: string; login: string; is_admin: boolean };
 type Session = { user: User | null; csrf_token: string };
 
 export function AuthGate({ children }: { children: (user: User, logout: () => Promise<void>) => React.ReactNode }) {

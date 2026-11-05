@@ -8,6 +8,7 @@ import { waitLabel } from './queue';
 import { useJob } from './useJob';
 import { useHistory } from './useHistory';
 import { AuthGate, type User } from './Auth';
+import { AdminPage } from './Admin';
 
 const MapView = lazy(() => import('./MapView').then(module => ({ default: module.MapView })));
 
@@ -25,7 +26,9 @@ const currentId = () => {
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 export function App() {
-  return <AuthGate>{(user, logout) => <Workspace key={user.id} user={user} logout={logout} />}</AuthGate>;
+  return <AuthGate>{(user, logout) => window.location.pathname.replace(/\/$/,'') === '/admin'
+    ? <AdminPage key={user.id} user={user} logout={logout} />
+    : <Workspace key={user.id} user={user} logout={logout} />}</AuthGate>;
 }
 
 function Workspace({ user, logout }: { user: User; logout: () => Promise<void> }) {
@@ -107,7 +110,7 @@ function Workspace({ user, logout }: { user: User; logout: () => Promise<void> }
 
   return <>
     <header className="topbar"><div><strong className="brand">MonoTrajectory<span>Web</span></strong>
-      <p>Монокулярне відео → траєкторія та розріджена карта</p></div><div className="account"><span className="current-user">{user.login}</span><button className="quiet" onClick={() => void logout()}>Вийти</button></div></header>
+      <p>Монокулярне відео → траєкторія та розріджена карта</p></div><div className="account"><span className="current-user">{user.login}</span>{user.is_admin && <a href="/admin">Моніторинг</a>}<button className="quiet" onClick={() => void logout()}>Вийти</button></div></header>
     <main className="layout">
       <aside className="sidebar">
         <section className="card upload"><h1>Нова задача</h1><p className="muted">Записане RGB-відео та параметри його камери.</p>

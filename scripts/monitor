@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO="$(cd -- "$(dirname -- "$0")/.." && pwd)"
+export PYTHONPATH="$REPO/backend"
+export MTW_RUNTIME_HOME=/home/demus
+exec /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python -m mtw.monitoring "$@"

@@ -398,12 +398,18 @@ class AuthenticationPostgresTests(unittest.TestCase):
             with migration_engine.connect() as c:
                 self.assertEqual(c.scalar(text("SELECT row_to_json(jobs) FROM jobs")), before | {"video_info": None})
                 self.assertEqual(c.scalar(text("SELECT version_num FROM alembic_version")), "0004_video_info")
-            migrate("head")
+            migrate("0005_compute_servers")
             with migration_engine.connect() as c:
                 self.assertEqual(c.scalar(text("SELECT row_to_json(jobs) FROM jobs")), before | {"video_info": None})
                 self.assertEqual(c.scalar(text("SELECT count(*) FROM compute_servers")),3)
                 self.assertEqual(c.scalar(text("SELECT count(*) FROM compute_servers WHERE state='ready'")),0)
                 self.assertEqual(c.scalar(text("SELECT version_num FROM alembic_version")),"0005_compute_servers")
+                c.execute(text("INSERT INTO users (id,login,password_hash,created_at) VALUES (:id,'existing','fixture-only',now())"),{'id':uuid4()})
+                c.commit()
+            migrate('head')
+            with migration_engine.connect() as c:
+                self.assertFalse(c.scalar(text("SELECT is_admin FROM users WHERE login='existing'")))
+                self.assertEqual(c.scalar(text('SELECT version_num FROM alembic_version')),'0006_admin_role')
         finally:
             migration_engine.dispose()
             assert schema.startswith("mtw_migration_") and len(schema) == 46

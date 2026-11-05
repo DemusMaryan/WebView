@@ -57,7 +57,16 @@ def csrf_token(token):
 
 
 def user_value(user):
-    return {"id": str(user.id), "login": user.login}
+    return {"id": str(user.id), "login": user.login, "is_admin": user.is_admin}
+
+
+def require_admin(request: Request):
+    current=getattr(request.state,'auth',None)
+    if not current or not current.get('user'):
+        raise error(401,'authentication_required','Sign in to access this resource')
+    if not current['user'].get('is_admin',False):
+        raise error(403,'admin_required','Administrator role required')
+    return current['user']
 
 
 def identity(token):
@@ -83,7 +92,7 @@ class BrowserSecurity:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+        if scope["type"] != "http" or not (scope["path"].startswith("/api/") or scope['path'] in {'/admin','/admin/'}):
             return await self.app(scope, receive, send)
         request = Request(scope)
         try:
