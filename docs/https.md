@@ -140,7 +140,7 @@ sudo install -m 0644 "$HOME/.local/share/monotrajectoryweb/web/tls/ca.crt.pem" /
 sudo update-ca-certificates
 ```
 
-Агент ці команди не запускав. [Ubuntu root CA trust](https://ubuntu.com/server/docs/how-to/security/install-a-root-ca-certificate-in-the-trust-store/). Немає глобального вимкнення certificate verification або змін browser settings. Черга/ETA, автомасштабування й адмінпанель залишаються наступними окремими етапами.
+Агент ці команди не запускав. [Ubuntu root CA trust](https://ubuntu.com/server/docs/how-to/security/install-a-root-ca-certificate-in-the-trust-store/). Немає глобального вимкнення certificate verification або змін browser settings. На момент Промпта9 черга/ETA, автомасштабування й адмінпанель були наступними етапами; тепер вони прийняті у Промптах10–12, див. [фінальне приймання](final-acceptance.md).
 
 Перед комітом повторний `scripts/status` знову підтвердив listener_verified=true, ті самі API/Nginx PID та два вільні compute. Останній окремий Windows `Get-PSDrive C` показав **19 791 806 464 байти (18,43 GiB)**; це пізніший замір, джерело фонового збільшення вільного місця в цьому етапі не досліджувалося. Bash syntax checks setup/setup-https/start/status успішні; для нового setup явно перевіряються наявні /usr/sbin/nginx та OpenSSL, залежності не перевстановлювалися.
 

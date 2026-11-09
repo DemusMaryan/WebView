@@ -1,5 +1,7 @@
 # Промпт 11: systemd-nspawn і автоматичний третій compute — R7
 
+> Часові ряди, кількості задач і PID — стан приймання R7 від 05.11.2026. Адмінпанель і фінальне приймання додані пізніше: [R8](admin-monitoring.md), [Промпт13](final-acceptance.md). Вони більше не є невиконаними етапами. Поточний запуск — [README](../README.md); збережені невдалі спроби не слід запускати заново за старими командами.
+
 **05.11.2026: Промпт 11 завершено, R7 перевірено.** Два зайняті native compute та черга автоматично спричинили запуск справжнього systemd-nspawn контейнера. Після isolation/health і Nginx readiness він виконав реальну задачу: 300 кадрів, 249 live-поз, 215 фінальних поз, 2726 точок. Усі чотири результати прийнятого сценарію валідні; додатковий попит не перевищив max3. Після явного stop не залишилося PID/namespace; controller знову працює з двома baseline. Початкові 54 задачі/owner/files збережено. **Тепер 71 задача: 54 + 13 з чотирьох невдалих спроб + 4 прийняті.** Усі спроби обліковані нижче, автоматичного циклу повторення тесту немає.
 
 ## Початкова можливість: успішно до 10 хвилин
@@ -191,7 +193,7 @@ Container `mtw-compute-3`; nspawn supervisor **3028**, init **3030**, applicatio
 | C | d1a1356c-1307-48ad-8341-5bb87a9efaed | compute-3 | host3052(local6) / host3104(local31) | 300 / 249 / 215 / 2726 | 32,087 |
 | D | 56d09c45-16cf-4e0c-a460-00ad3ebdc586 | compute-1 | host3079 / 3123 | 300 / 251 / 205 / 2724 | 31,671 |
 
-Усі succeeded; JSONL frame_id/PTS/Twc/null/segments, finite points/quaternions та фінальна snapshot consistency перевірені. Points limit100000, truncation=false для всіх. Wall time виміряний monotonic і включає decode, vocabulary/native зі стандартним pacing, export та cleanup; це не чиста швидкість SLAM. UTC clocks у samples коригувалися, тому elapsed/overlap беремо з monotonic, не різниці wall-clock.
+Усі succeeded; JSONL frame_id/PTS/Twc/null/segments, finite points/quaternions та фінальна snapshot consistency перевірені. Points limit100000, truncation=false для всіх. Worker wall у таблиці — `result.json.worker_wall_seconds`, monotonic від decode до фінальної валідації: vocabulary/native processing, JSONL/snapshots і export, без playback pacing. Він не включає подальше збереження manifest та manager cleanup; повний `Job.execution_seconds` включає запуск child, wait/reap і cleanup. Це не чиста швидкість SLAM. UTC clocks у samples коригувалися, тому elapsed/overlap беремо з monotonic, не різниці wall-clock.
 
 Максимум active=3, supervisor=1, один job/server; D queued без native, фактичне очікування 4,371 с. A/B native перекриття ≥16,676 с. C/D native перекриття ≥16,058 с, з одночасними frame progress протягом ≥8,425 с: C105→299 / CPU+1810 ticks, D0→176 / CPU+1812. Загальні native CPU deltas A/B/C/D =3446/4077/3463/3484. Третій сервер обробляє реальні дані, а не лише health/HTTP запити. Вимога не потребує одночасного tracking усіх трьох: базові короткі ролики можуть завершитися під час завантаження vocabulary нового процесу.
 

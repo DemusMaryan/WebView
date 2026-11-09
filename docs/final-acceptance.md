@@ -1,5 +1,7 @@
 # Фінальне приймання та підготовка до захисту
 
+Редакційне уточнення 09.11.2026: цей документ фіксує приймання 06.11, не нові сьогоднішні вимірювання. Виправлено опис часу: `mono_export` має `pacing_enabled=false`; worker wall охоплює decode/vocabulary/native processing/export/validation **без playback pacing**. Він виміряний у manifest до manager cleanup; повний `Job.execution_seconds`, який використовується для ETA, додатково включає запуск child і cleanup. Baseline `mono_tum` окремо мав стандартний pacing. Числа результату та сирі native докази не змінені; нових SLAM-запусків не було. `final_evidence.py` очікує baseline72 jobs, це harness конкретного приймання, не звичайна команда повтору на робочій БД.
+
 Прийнято **06.11.2026, Europe/Kyiv** (новий browser run: 05.11 22:00:42–22:03:01 UTC). Межі Промпта 13: перевірки й документація; production-код, CV-ядро, ABI, залежності та системні налаштування не змінювалися. R1–R8 підтверджені в описаному локальному середовищі; це не перевірка довільного відео чи багатовузлового production deployment. Остаточну навчальну оцінку визначає викладач.
 
 Початковий [WebProject.txt](../WebProject.txt) не змінений. Нижче формулювання його пунктів наведені дослівно; ідентифікатори R1–R8 — позначення проєкту. HTTPS винесено окремо через стан довіри браузера.
@@ -81,7 +83,7 @@
 | Реальне відео | ≤40с, ≤1200 decoded frames, ≤1280×720; параметри запиту можуть лише зменшити максимуми |
 | Калібрування | обов'язкове, finite числа, fx/fy>0, principal point всередині; decoded dimensions рівні calibration; без resizing або автоматичного TUM для стороннього відео |
 | Потоки й час | рівно один video stream, RGB; actual PTS обов'язкові/strictly increasing, відлік від першого PTS; duration враховує останній frame duration |
-| Execution | 1–180с; compute budget охоплює decode, запуск/vocabulary, paced native pipeline, export; queue time виключено; при timeout група TERM/KILL→wait/reap→cleanup |
+| Execution | 1–180с — параметр budget дочірнього worker: decode, запуск/vocabulary, native pipeline без playback pacing, export/validation; queue time виключено. При timeout TERM/KILL→wait/reap→cleanup; ця фіналізація може додати час до terminal status і повного `Job.execution_seconds` |
 | Місце | native reserve2GiB та C:5GiB; для цього контрольного запуску перед стартом C:≥10GiB; RAM/commit інформаційні |
 
 Схеми `mtw_final_*` і каталоги тестів створено окремо від public; після тестів видалено. П'ять нових test methods у `backend/tests/test_final_input_pg.py` перевірили: допустимі 3 RGB frames на точних межах; усі6 параметрів вище configured cap та некоректне калібрування→422 із назвою поля; частково записаний файл понад request cap→413, empty→422; total Content-Length/chunked body→413. Після upload-відмов нових jobs/директорій немає.
@@ -125,7 +127,7 @@ Native ROOT: `/home/demus/.local/share/monotrajectoryweb/web/reports/final-833d8
 | Job/server | `4c718f50-153f-4c61-a33e-f4ce8ce42a94`, compute-1; POST202 |
 | Результат |300 frame records0–299,252 valid live/48 null,226 final poses,2695 exported points, cap100000, truncation=false |
 | Валідація | finite xyz, Twc rotations/quaternions, timestamp=frame_id/30, final IDs subset live, однакові map/segment, workers_finished=true, active_gba=0, stable geometry digests |
-| Час | worker wall **32,205482с**: decode/vocabulary/native pacing/export; це не чиста швидкість SLAM і не FPS benchmark |
+| Час | worker wall **32,205482с**: decode/vocabulary/native processing/export/validation без playback pacing; це не чиста швидкість SLAM і не FPS benchmark |
 | Live | snapshots/points змінювалися до succeeded; canvas screenshots live-8/47/86, matching frame label/alt/job; без штучних затримок |
 | Після завершення | результат й історія після reload; робочих RGB немає, preview200, input/results/JSONL збережені, process group порожня |
 | Повний restart | API/compute/Nginx/monitor/autoscaler/dispatcher та PostgreSQL штатно stop→start; до stop нема активних jobs; БД реально stopped, усі service PID absent; після start ready2/max3, compute-3 stopped |

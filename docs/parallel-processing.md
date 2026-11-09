@@ -1,5 +1,7 @@
 # Промпт 6: паралельні обчислення через Nginx — R5
 
+> Це журнал приймання R5, включно з відхиленими спробами. Два глобальні слоти — межа цього історичного сценарію; нині R7 дає base2/max3, по одному на ready compute. Згадки незавершеної ізоляції та старі RAM/commit gates нижче датовані й не скасовують прийняті cancel/timeout докази. Старі анонімні HTTP CLI-команди не адаптовані до поточного HTTPS/auth і не є повторюваним smoke-сценарієм. Використовуйте [README](../README.md), [актуальний контракт](api-contract.md) та [фінальне приймання](final-acceptance.md); не повторюйте прийняті відеопрогони без потреби.
+
 **03.11.2026, Промпт 6 завершено, R5 перевірено в локальній конфігурації.** Успішна базова пара з перекриттям **≥10,140 с** та двома валідованими результатами збережена без повторного запуску. Завершено окремі перевірки ізоляції cancel/timeout після виправлення незбирання zombie. Сусідні задачі успішні, worker/native PID зникли з /proc, слоти вільні. Невдалі попередні перевірки залишені як історія й не зараховані за фінальний успіх. Наступні етапи не розпочиналися.
 
 ## Завершення ізоляції cancel/timeout, 03.11.2026
@@ -331,7 +333,7 @@ wsl -d Ubuntu --exec env PYTHONPATH=backend MTW_POSTGRES_TESTS=1 /home/demus/.lo
 
 Чотири нові PostgreSQL-тести використовують випадкову ізольовану schema і прибирають тільки її: 8 конкурентних claims дають рівно 2 різні reservations; третя задача queued; terminal status звільняє reservation; running не захоплюється повторно; token переживає відновлення циклу; БД відхиляє другий активний job на одному server_id. Попередні 14 тестів контрактів/preview/cleanup також пройшли. Доданий згодом п'ятий PG-тест окремо пройшов за 0,970 с: cancel ще не прийнятого dispatching reservation знімає його й блокує пізню доставку. Разом 19 різних перевірок, без нового CV-запуску для останнього тесту. Це не підміняє повне реальне приймання.
 
-Реальний тест, **повторювати лише після відновлення запасу C:**:
+Історична команда реального тесту до auth/HTTPS, **не поточна інструкція запуску**:
 
 ```powershell
 wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_e2e.py --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-20261103.json
@@ -339,7 +341,7 @@ wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotraject
 
 Цей файл доказів уже існує; для наступної спроби обов'язково нове ім'я. Тест не перезаписує старий звіт. План повного тесту — шість API-задач: дві до успіху + третя corrupted у черзі; потім пара cancel/survivor і короткий timeout на звільненому слоті. Перша спроба створила три задачі, друга (`parallel-20261103-retry.json`) — п'ять до повторного блокера. Не потрібно ще раз запускати дві вже успішно перевірені задачі.
 
-Після стабілізації місця повторювати тільки решту ізоляції (три нові задачі, одна до успіху, одна до cancel, одна до timeout):
+Історичний план повторити залишок ізоляції після стабілізації місця (нині приймання вже завершене; анонімний CLI нижче не адаптований до HTTPS):
 
 ```powershell
 wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python backend/tests/parallel_e2e.py --isolation-only --output /home/demus/.local/share/monotrajectoryweb/web/reports/parallel-isolation-next.json

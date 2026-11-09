@@ -1,5 +1,7 @@
 # Нативна архітектура
 
+Актуальна схема після Промптів 1–13; [фінальне приймання](final-acceptance.md). Кількості задач, PID та статуси служб у звітах етапів — датовані докази; свіжий стан показує `scripts/status`.
+
 Промпти 3–4 перевірено 02.11.2026; [аудит Промпта 5](day1-report.md) зберігає історичний зріз послідовного dispatcher. [Промпт 6](parallel-processing.md) підтвердив два слоти, [7–9](api-contract.md) — глобальні ліміти, ownership/auth та HTTPS, [10](queue-eta.md) — FIFO й приблизне очікування. [Промпт 11](autoscaling.md) перевірив автоматичний systemd-nspawn compute-3 з реальним валідним результатом і max3. Базові компоненти — native WSL, додатковий — справжній Linux-контейнер того самого WSL kernel, без Docker. Frontend React/TypeScript/Vite/Three.js віддається власним Nginx на https://127.0.0.1:8443; HTTP:8080 тільки GET/HEAD redirect. Поточні адреси, ліміти й шляхи централізовані у `config/local.toml`.
 
 ```text
@@ -36,7 +38,7 @@ Frontend читає public limits через `/api/config`, опитує лиш�
 
 R5 перевірено: збережена справжня пара через Nginx із native overlap ≥10,140 с та двома валідованими результатами; окремо завершені cancel/timeout isolation на різних compute. Python manager дочікується й збирає всі записи власного PGid, включно із zombie, перш ніж очищати PNG і звільняти слот. Сусідня група продовжує роботу, API доступний. Це два незалежні HTTP-процеси одного WSL-вузла; часові ряди/PID/результати — у `docs/parallel-processing.md`. У тестовому сценарії лишилися C: ≥10 GiB перед стартом і 5 GiB аварійного резерву; RAM/commit — інформаційні. Глобальні ресурси ОС, pagefile, CV/ABI/Shutdown та стандартний job limit 180 с незмінні; per-job 22 с застосовано тільки timeout-target через вже наявний механізм.
 
-R7: обрано systemd-nspawn з реальними PID/mount namespaces, read-only root/core/repo, UID1000/NoNewPrivs, shared private loopback. Root controller атомарно резервує єдиний compute-3 starting slot, має startup timeout/cooldown/max attempts, не видаляє queued work при помилці; max3 включає starting. Baseline лишається native2, автоматичного зменшення немає. Пакети/CV/ABI не перебудовуються, rootfs й дані — native WSL. Контейнерний спосіб, Nginx routing, реальний native/result, max3 та stop без PID перевірені 05.11.2026; деталі й обмеження — [autoscaling.md](autoscaling.md). R8 додано у Промпті12: явна admin-role і read-only monitoring; фінальний етап не починався.
+R7: обрано systemd-nspawn з реальними PID/mount namespaces, read-only root/core/repo, UID1000/NoNewPrivs, shared private loopback. Root controller атомарно резервує єдиний compute-3 starting slot, має startup timeout/cooldown/max attempts, не видаляє queued work при помилці; max3 включає starting. Baseline лишається native2, автоматичного зменшення немає. Пакети/CV/ABI не перебудовуються, rootfs й дані — native WSL. Контейнерний спосіб, Nginx routing, реальний native/result, max3 та stop без PID перевірені 05.11.2026; деталі й обмеження — [autoscaling.md](autoscaling.md). R8 додано у Промпті12: явна admin-role і read-only monitoring; фінальне приймання завершено у Промпті13.
 
 
 ## Моніторинг R8

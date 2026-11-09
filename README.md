@@ -1,155 +1,94 @@
 # MonoTrajectoryWeb
 
-Навчальний вебпроєкт: обробка записаного монокулярного відео з поступовим показом оціненої траєкторії камери й розріджених 3D-точок. Масштаб відносний, результати мають зберігатися. Живий потік, повторна локалізація у збереженій кімнаті та щільна модель поза темою.
+Локальний вебзастосунок для обробки записаного монокулярного RGB-відео через ORB-SLAM3. Користувач передає відео та явне калібрування, бачить реальний прогрес, RGB-кадр, траєкторію камери й розріджені 3D-точки, зберігає результат або скасовує задачу. Координати мають відносний масштаб; живий потік, повторна локалізація у збереженій кімнаті та щільна модель поза темою.
 
-## Поточний стан
+## Перевірений стан
 
-**Промпт 13: фінальне приймання завершено 06.11.2026.** R1–R8 підтверджені в задокументованих локальних межах; [точні формулювання, реалізація, докази й спосіб показу](docs/final-acceptance.md), [сценарій захисту на5–7хв і карта файлів](docs/how-it-works.md). Прогалини R1 закриті isolated PG/input/decode/cleanup tests без SLAM; timeout підтверджений незмінним перевіреним шляхом R5. Єдиний новий HTTPS UI run: `4c718f50-153f-4c61-a33e-f4ce8ce42a94`, compute-1, **300frames /252 valid live /226 final poses /2695points**, cap100000 без обрізання, worker32,205с включно з decode/pacing/export. Live snapshots і карта змінювалися до завершення; full PostgreSQL/service restart зберіг session/history/result. Усі72 старі задачі/owners/files незмінні; **зараз73**, active0, legacy51 owner=NULL, admins0, ready2/max3. CV/ABI/залежності не перебудовувалися. Curl з CA без `-k` перевірив TLS; Chrome без overrides досі не довіряє CA, functional browser test мав ignoreHTTPSErrors=true. Ручні CA/admin/legacy кроки — у звіті. Нижче збережено історичні підсумки етапів; кількості задач у них стосуються відповідного моменту.
+R1–R8 прийняті в локальних сценаріях Промптів 1–13. [Вимоги](docs/requirements.md), [точні докази фінального приймання](docs/final-acceptance.md), [пояснення та захист на 5–7 хвилин](docs/how-it-works.md).
 
-**Промпт 12 завершено: панель адміністратора R8.** https://127.0.0.1:8443/admin та GET `/api/admin/monitoring`: 401 без входу, 403 звичайному користувачу, доступ лише admin. Міграція **0006_admin_role**, default false, явний локальний `scripts/admin-role --login EXISTING_LOGIN --grant/--revoke`; у робочій БД ролі не призначалися, адміністраторів **0**. Окремий root monitor кожні2с кешує стан служб, registry/slots/queue/ETA, host/container PID, CPU/RSS та спільні WSL CPU/RAM; немає process-control UI. **56 backend tests, 11 frontend tests/build**, HTTPS browser ACL/live/native/container/stale/poll cleanup пройшли. Єдина нова реальна задача того етапу: 300 кадрів/live251/final192/points2746, валідна. Всі71 попередні записи/owner/files і CV/R5/R6/R7 hashes збережені; тоді стало72. Після probes baseline2/compute-3 stopped відновлені. [Ролі, команди, докази, screenshots та обмеження](docs/admin-monitoring.md).
+Останнє обчислювальне приймання — **06.11.2026**: задача `4c718f50-153f-4c61-a33e-f4ce8ce42a94`, 300 кадрів, 252 валідні live-пози, 226 фінальних поз, 2695 точок, без обрізання. Worker wall 32,205 с включає декодування, завантаження словника, native processing, експорт і валідацію, **без playback pacing**. Це не чистий час SLAM; manager cleanup відбувається пізніше й входить до окремого `Job.execution_seconds`. Після повного restart PostgreSQL і служб збережено 73 задачі, власників і файли; на той момент active=0, legacy51 owner=NULL, admins=0. Ці числа — датований результат перевірки, не поточна телеметрія.
 
-**Промпт 11 завершено: R7 перевірено 05.11.2026.** За двох зайнятих native compute й появи черги controller автоматично запустив справжній systemd-nspawn контейнер `mtw-compute-3`, перевірив ізоляцію/health і підключив його до Nginx. Контейнерна задача дала 300 кадрів, 249 live-поз, 215 фінальних поз і 2726 точок. Усі чотири задачі прийнятого сценарію валідні; четверта чекала при трьох зайнятих слотах. Максимум — 3, один слот на сервер; ETA враховує лише ready-сервери. 58 backend tests успішні; 8 UI tests/build з попередньої підготовки залишаються чинними. Після явного stop усі PID контейнера зникли; зараз знову два baseline й активний controller. Всі початкові 54 задачі/owner/files збережені; **тепер 71**, включно з 13 задачами чотирьох невдалих спроб і 4 прийнятими. Міграція — **0005_compute_servers**. [Команди, всі спроби, PID/часи, результати й обмеження](docs/autoscaling.md). Адмінпанель/фінальний етап не розпочато.
+Звірка документації 09.11.2026 не запускала нових CV-задач і не змінювала ядро, залежності, конфігурацію чи дані. Історичні звіти нижче збережені для доказів; їхні старі HTTP-команди й тимчасові блокери не є поточними інструкціями запуску.
 
-**Промпт 10 завершено: черга й приблизне очікування R6.** FIFO `created_at, id`, позиція власної queued-задачі та ETA за успішними вимірюваннями й відеохарактеристиками, з моделлю двох слотів і конфігурованим cold start. Через HTTPS виконано один реальний сценарій: дві native-задачі працювали, третя чекала на позиції 1, пережила restart dispatcher та почалася після звільнення слота. Прогноз **20,3 с**, фактично **19,33 с після прогнозу**; всі три результати валідні, браузер бачив queued → running → succeeded і reload. 34 backend tests, 8 frontend tests та build успішні. Збережено всі 51 попередню задачу; **тепер 54**, додано тільки три явно перевірочні задачі й окремий test account. [Метод, UUID/PID, HTTP, докази та обмеження](docs/queue-eta.md).
+## Запуск у підготовленому середовищі
 
-**Промпт 9 завершено: локальний HTTPS.** Застосунок і користувацький API працюють на **https://127.0.0.1:8443**, TLS 1.2/1.3, session-cookie Secure/HttpOnly/SameSite=Strict. HTTP:8080 перенаправляє GET/HEAD зі збереженням шляху; зміни стану через HTTP відхиляються. Curl із явним локальним CA перевірив сертифікат і hostname без `-k`; 34 унікальні backend tests, 7 frontend tests, build і два браузерні контексти успішні. **CA не встановлено в системну довіру**: звичайний тестовий Chrome отримав ERR_CERT_AUTHORITY_INVALID; функціональні тести використовували `ignoreHTTPSErrors: true`. Усі 51 задача, власники, файли та докази R5 збережені, SLAM не запускався. [TLS, команди, докази та ручна довіра CA](docs/https.md).
-
-**Промпт 8 завершено: локальна авторизація та власність R4.** Реєстрація/вхід/вихід, паролі Argon2id, серверні сесії PostgreSQL, HttpOnly/SameSite=Strict cookie та CSRF/Origin. Історія/total і всі шляхи задач перевіряють власника: 401 без входу, 404 для чужого id. Dispatcher/compute мають окремий приватний службовий ключ, включно з прямими URL. **51 старий запис і всі файли збережено, owner_id залишився NULL**: новий обліковий запис їх не бачить до явного CLI-призначення. Робочих користувачів не створювали, CLI на робочих задачах не виконували. Історичні 23 backend checks, 7 frontend tests, build і два ізольовані Chrome контексти пройшли без SLAM; HTTPS додано у Промпті 9. [Вхід, оновлення, призначення старих задач і докази](docs/authentication.md).
-
-**Промпт 7 завершено: глобальний ліміт збережених задач та історія R3.** Типово **100 усіх задач** незалежно від стану, окремо **10 pending**; атомарне створення в PostgreSQL, HTTP 429 `stored_job_limit_reached` без залишків відхиленого upload. `GET /api/jobs?page=1&page_size=20` повертає `items`, `total`, `page`, `page_size`, `total_pages`, `has_next`, `has_previous`, `stored_job_limit`; максимум 100 на сторінку, порядок `created_at DESC, id DESC`. UI показує ліміт і сторінки та зберігає відкриту задачу під час refresh. Усі **51 наявна задача та їхні файли збережені**, нових робочих задач у цьому етапі не створювали. 12 backend tests в isolated PostgreSQL, 6 frontend tests, build та браузерний перегляд 20/20/11 записів успішні. [Актуальний контракт і докази](docs/api-contract.md).
-
-**Промпт 6 завершено, R5 перевірено в локальній конфігурації.** Збережено успішну пару з native overlap ≥10,140 с і двома валідованими результатами. Окремо пройшли cancel та timeout: цільові worker/native повністю зібрані, слот звільнений, сусідній PID продовжив обробку й завершився валідним результатом. Виправлено Python reaping пізно завершених дочірніх процесів; CV-ядро й ABI не змінювалися. Фінальна перевірка включає zombie: залишених PID немає, 0 активних задач, 51 збережена задача. Базову пару не повторювали. [UUID/PID, події, ресурси й валідація](docs/parallel-processing.md).
-
-У [config/r5-test-resources.toml](config/r5-test-resources.toml) для R5 залишено тільки дискові умови: C: ≥10 GiB перед запуском, скасування обох тестових задач при C: <5 GiB. **RAM і commit — лише інформаційні показники, без блокування та автоскасування**, навіть коли RAM нижче 512 MiB. Тайм-аут і cancel збережені; максимум 2 обчислення загалом / 1 на compute. Для timeout використано наявний параметр execution_seconds=22 лише цільової задачі; стандарт 180 с і глобальна конфігурація незмінні. Налаштування Windows/WSL/pagefile не змінювалися.
-
-**Промпт 5: історичний аудит підготовлено 3 листопада 2026 року.** [Стан R1–R8 на той момент](docs/day1-report.md), [оновлене пояснення та питання/відповіді](docs/how-it-works.md). Виявлені прогалини закриті Промптами6–13: паралельність, stored cap, авторизація/власність, HTTPS, ETA, контейнерне розширення, адмінпанель і R1 acceptance. Актуальний статус — [requirements](docs/requirements.md) та [final acceptance](docs/final-acceptance.md).
-
-**Промпт 4 завершено 2 листопада 2026 року.** React/TypeScript/Vite frontend з Three.js доступний на **http://127.0.0.1:8080**: відео й явне калібрування, історія/стан/скасування, узгоджений RGB-кадр, реальні поступові точки/траєкторія та фінальний результат. Браузерні перевірки у Chrome через Playwright пройшли; frontend build і 4 тести даних/геометрії успішні. [Фактичний звіт і screenshot](docs/frontend-prototype.md).
-
-Нові задачі після зупинки процесів очищають декодовані робочі PNG, зберігаючи опубліковані previews, вихідне відео та результати. Початкові **29 задач збережено без очищення**; у робочій БД зараз **73 задачі (72 попередні +1 у фінальному прийманні)**. Захист C:5GiB не змінено. Автоматичного retention старих задач немає.
-
-**Промпт 3 перевірено 2 листопада 2026 року:** реальне відео через API → PostgreSQL queue → dispatcher → Nginx → незалежний compute → дочірній worker/mono_export. Отримано проміжні snapshots і фінальний результат; перевірено скасування, timeout, ліміти та збереження після перезапуску сервісів і БД. Цей історичний backend-звіт збережено окремо від UI-приймання Промпта 4. Локальний прототип без авторизації/HTTPS, `owner_id=null`. [Фактичні HTTP-запити, job_id/server_id і докази](docs/backend-prototype.md).
-
-Готовий локальний застосунок у поточному WSL, з PowerShell у цій робочій папці:
+З PowerShell у поточній робочій папці:
 
 ```powershell
 wsl -d Ubuntu --exec bash scripts/start
 wsl -d Ubuntu --exec bash scripts/status
 ```
 
-Окремі команди зупинки після демонстрації:
+Сайт — **https://127.0.0.1:8443**, панель адміністратора — **https://127.0.0.1:8443/admin**. Увійти або створити власний обліковий запис; стандартного пароля немає. Усі listeners прив'язані до loopback. HTTP:8080 лише перенаправляє GET/HEAD на HTTPS; службовий балансувальник працює на 8081, compute — 8101/8102 і контейнерний 8103 після готовності, API — 8000, власний PostgreSQL — 55432.
+
+Зупинка служб; потім, за потреби, також власного PostgreSQL:
 
 ```powershell
 wsl -d Ubuntu --exec bash scripts/stop
-# За потреби зупинити також власний PostgreSQL після служб:
 wsl -d Ubuntu --exec bash scripts/stop postgres
 ```
 
-Цей запуск повторно перевірено з HTTPS у Промпті 9. Сертифікати вже створені; для першої підготовки TLS виконай `wsl -d Ubuntu --exec bash scripts/setup-https`. Команда повторно використовує CA й не встановлює довіру автоматично. `start` із відсутнім/некоректним сертифікатом зупиняється з поясненням, без HTTP fallback. Після змін UI окремо виконай `wsl -d Ubuntu --exec bash scripts/build-ui`; остання перевірена production-збірка вже є, для звичайного старту повторювати її не потрібно.
+Start/stop керують лише процесами проєкту та зберігають задачі й файли. Для звичайного старту не потрібно повторювати setup, build UI або збирання CV.
 
-Передумови — уже зібраний `mono_export`, PostgreSQL 16, Nginx, OpenSSL, FFmpeg і Python venv. Якщо UI-залежності відсутні: `wsl -d Ubuntu --exec bash scripts/setup-ui`. Окремі backend venv, БД/роль `mtw`, TLS та файлове сховище створює `scripts/setup`; повторний запуск зберігає дані. `scripts/stop` зупиняє лише власні процеси; `postgres` можна додати окремо. Налаштування й ліміти — `config/local.toml`. Вхід: `https://127.0.0.1:8443`, HTTP 8080 лише GET/HEAD redirect; приватні API 8000, Nginx 8081, compute 8101/8102, власний PostgreSQL 55432; усі bind на localhost. Прямий HTTP user API відхиляється, службовий шлях з окремим ключем збережений. Наявне CV-ядро повторно збирати не потрібно.
+Передумови: Ubuntu у WSL, підготовлений ORB-SLAM3/mono_export і залежності, PostgreSQL 16, Nginx, OpenSSL, FFmpeg, backend venv, frontend dependencies/збірка та systemd-nspawn для R7. Налаштування — `config/local.toml`; міграції — до `0006_admin_role`. Для початкової підготовки окремо існують `scripts/setup`, `setup-ui`, `setup-https`, `migrate`; їхнє призначення описане в тематичних документах. Залежності й ABI не перебудовувати без конкретної потреби. Docker/Compose не використовуються.
 
-POST `/api/jobs` приймає multipart `video` і JSON-поле `parameters` з обов’язковим явним калібруванням та user session/CSRF. Поточний [контракт API](docs/api-contract.md); приклади Промпта 3 історичні, анонімний POST тепер відхиляється. Профіль TUM не застосовується до сторонніх відео автоматично.
+## Відео, ліміти й доступ
 
-Кількісні ліміти задаються `limits.stored_jobs=100` і `limits.queued_jobs=10` у `config/local.toml`. Після зміни ліміту перезапусти API: `wsl -d Ubuntu --exec bash scripts/stop api`, потім `wsl -d Ubuntu --exec bash scripts/start api`. Зменшення cap нижче наявного count не видаляє записи й не блокує перегляд/скасування. Новий list-контракт повертає об'єкт з `items`; старий `?limit=50` замінено на `?page=1&page_size=20`. [Параметри, помилки та команди тестів](docs/api-contract.md).
+- Вхід: відеофайл та JSON калібрування саме його камери; TUM-профіль не застосовується до сторонніх відео автоматично.
+- Межі однієї задачі: **64 MiB, 40 с відео, 1200 кадрів, 1280×720, execution 1–180 с**. Перевіряються й фактично декодовані кадри; resize не виконується.
+- Глобально **100 збережених задач усіх станів**, окремо **10 pending**, включно з активними. Історія лише власна: 20 на сторінку, максимум 100.
+- Два базові compute, максимум три при автоматичному розширенні; один слот на сервер. Черга FIFO, ETA приблизний. R7 використовує справжній nspawn-контейнер зі спільним WSL kernel/RAM; автоматичного scale-down немає.
+- Нові задачі очищають робочі decoded PNG після завершення процесів; input, previews, JSONL та результати зберігаються. Початкові 29 задач не очищалися, автоматичного retention немає.
+- Дані й великі залежності лежать у `/home/demus/.local/share/monotrajectoryweb`, поза Git/OneDrive. VHDX фізично на C:, тому guard зберігає **5 GiB на C:** і 2 GiB у native FS; RAM/commit — інформаційні.
 
-Успішна API-задача `e8688279-ad66-42af-b7ec-3ce672547406`, compute-2: 798 frame-записів, 688 валідних live-поз, 429 фінальних поз, 2780 точок (cap 100000, без обрізання). POST — 0,140 с; worker wall — 62,461 с, включно з decode 26,810 с і native total 35,121 с. Це не чистий час SLAM. До завершення спостерігалися 52 різні frame_id. Snapshot обмежений 256 точками/240 записами історії; JSONL і великі масиви завантажуються окремо. Результат збережено після повного перезапуску.
+Готовий короткий контрольний ролик і paired calibration у Windows file picker:
 
-R1–R8 перевірено у задокументованих локальних сценаріях. Dispatcher використовує fresh ready registry: базово два слоти, максимум три / один на екземпляр. Автомасштабування використовує Linux-контейнер того самого WSL-вузла; автоматичного зменшення немає. Персональних квот немає; адміністрування тільки read-only. Поточна міграція — **0006_admin_role**; [моніторинг і явне призначення ролі](docs/admin-monitoring.md). Наявне CV-ядро, ABI та залежності не перебудовуються.
-
-**Промпт 2 перевірено 1 листопада 2026 року** нативно у WSL: `freiburg1_xyz`, усі 798 покадрових записів, 689 валідних live-поз, 458 поз фінальної підмножини та 2690 справжніх 3D-точок. Експорт завершився з кодом 0; `validation.json` підтвердив дані, проміжні записи під час роботи та графік. Координати мають відносний масштаб; метричну точність не оцінювали.
-
-Історичний baseline `mono_tum` від 31 жовтня збережено окремо: 38 поз ключових кадрів за 44,03 с зі стандартним pacing. Це не кількість покадрових поз і не чистий час обчислення. Цей результат Промпта 2 збережений окремо від нового відео/API-запуску.
-
-Docker, Docker Compose і Dockerfile у проєкті не використовуються. PostgreSQL, Nginx, API, dispatcher та незалежні HTTP compute-сервери працюють нативними процесами WSL.
-
-## Документи
-
-- [WebProject.txt](WebProject.txt) — вихідна навчальна умова.
-- [Оновлені промпти дня 1](<MonoTrajectoryWeb-Day-01-Codex-Prompts (1).md>) — актуальний файл користувача; наступні етапи не запускаються автоматично.
-- [AGENTS.md](AGENTS.md) — межі роботи, перевірки та правила Git.
-- [Вимоги R1–R8](docs/requirements.md) — майбутня реалізація, критерії й статуси.
-- [План на чотири дні](docs/day-plan.md).
-- [Нативна архітектура і подальший план](docs/architecture.md).
-- [Worker, API, ліміти та фактичні перевірки](docs/backend-prototype.md).
-- [Актуальний контракт API, глобальний ліміт та пагінація R3](docs/api-contract.md).
-- [Облікові записи, сесії, власність і CLI старих задач R4](docs/authentication.md).
-- [Локальний HTTPS, сертифікати, перевірки та ручна довіра CA](docs/https.md).
-- [FIFO-черга, приблизне очікування та три реальні результати R6](docs/queue-eta.md).
-- [Справжній nspawn compute R7, автоматичний запуск, докази й обмеження](docs/autoscaling.md).
-- [Захищений адміністративний моніторинг R8](docs/admin-monitoring.md).
-- [Фінальне приймання R1–R8, demo-команди й ручна публікація](docs/final-acceptance.md).
-- [Frontend, карта, preview/cleanup і браузерне приймання](docs/frontend-prototype.md).
-- [Підсумковий аудит дня 1 і залишок R1–R8](docs/day1-report.md).
-- [Пояснення проєкту й самоперевірка](docs/how-it-works.md).
-- [Два compute-слоти, Nginx і фактичне приймання R5](docs/parallel-processing.md).
-- [Декодування відео й перетворення TUM](docs/video-worker.md).
-- [Результати, калібрування, обмеження й команди CV-прототипу](docs/cv-prototype.md).
-- [Графік справжньої траєкторії та точок](docs/figures/cv-trajectory.png).
-
-Стек за планом: Python/FastAPI, PostgreSQL/SQLAlchemy/Alembic, React/TypeScript/Vite, Nginx та нативні скрипти WSL. Перевірене ядро — ORB-SLAM3 `4452a3c4ab75b1cde34e5505a36ec3f9edcdc4c4`, Pangolin v0.8 `aff6883c83f3fd7e8268a9715e84266c42e2efe3`. Версії пакетів зафіксовано у `scripts/cv/ubuntu-packages.tsv`.
-
-## Перевірене середовище
-
-Початковий огляд виконано 31 жовтня 2026 року під час Промпту 1; тоді пакети не встановлювалися, ядро не завантажувалося й не збиралося.
-
-| Засіб | Windows | Ubuntu у WSL2 |
-| --- | --- | --- |
-| ОС | Windows 11 Pro, 10.0.26200, x64; PowerShell 5.1 | Ubuntu 24.04.3 LTS, x86_64; запуск підтверджено |
-| Git | 2.51.1.windows.1 | 2.43.0 |
-| Python | 3.13.5 через `python` і `py` | 3.12.3 через `python3` |
-| Node / npm | v24.21.0 / 10.8.3 | Linux `node` не знайдено; `npm` успадкований із Windows PATH, 10.8.3 |
-| CMake | 3.28.3-msvc11 у Visual Studio; поза поточним PATH | 3.28.3 |
-| C++ | MSVC 19.40.33813 x64 у Visual Studio 2022; `cl` поза поточним PATH | g++ 13.3.0; `c++` і `g++` доступні |
-
-Збирання ядра перевірено з C++17, OpenCV 4.6, Eigen 3.4 та Boost 1.83. Великі залежності, build і результати лежать у `/home/demus/.local/share/monotrajectoryweb`, поза основним репозиторієм.
-
-Перевірені команди огляду з PowerShell:
-
-```powershell
-wsl -d Ubuntu -- cat /etc/os-release
-wsl -d Ubuntu -- python3 --version
-wsl -d Ubuntu -- cmake --version
-wsl -d Ubuntu -- g++ --version
+```text
+\\wsl.localhost\Ubuntu\home\demus\.local\share\monotrajectoryweb\datasets\freiburg1_xyz-rgb-30fps-short-10s.mp4
+\\wsl.localhost\Ubuntu\home\demus\.local\share\monotrajectoryweb\datasets\freiburg1_xyz-rgb-30fps-short-10s.parameters.json
 ```
 
-## Відтворення CV-прототипу
+TLS 1.2/1.3 перевірено через `curl --cacert` без `-k`. На останньому прийманні Chrome не довіряв локальному CA; functional Playwright context мав `ignoreHTTPSErrors=true`. **Автоматичного імпорту CA немає**; [ручна довіра та перевірка fingerprint](docs/https.md). Для живої адмінпанелі користувач явно обирає існуючий login і виконує `scripts/admin-role --login EXISTING_LOGIN --grant`; [роль і зняття прав](docs/admin-monitoring.md). Legacy jobs не видаються новому користувачу автоматично; [явне CLI-призначення](docs/authentication.md).
 
-У підготовленому середовищі, з PowerShell у поточній робочій папці:
+## Актуальні документи
 
-```powershell
-wsl -d Ubuntu --exec bash scripts/cv/run-export.sh
-```
+| Потреба | Документ |
+| --- | --- |
+| Вихідна навчальна умова | [WebProject.txt](WebProject.txt), не редагувати |
+| Статус R1–R8 | [requirements.md](docs/requirements.md) |
+| Докази, demo-команди, ручні кроки | [final-acceptance.md](docs/final-acceptance.md) |
+| Пояснення, карта коду, сценарій захисту | [how-it-works.md](docs/how-it-works.md) |
+| Компоненти, слоти й життєвий цикл | [architecture.md](docs/architecture.md) |
+| HTTP-контракт, ліміти й пагінація | [api-contract.md](docs/api-contract.md) |
+| Accounts/sessions/ownership та legacy CLI | [authentication.md](docs/authentication.md) |
+| TLS і ручна довіра CA | [https.md](docs/https.md) |
+| Декодування та підготовка контрольного відео | [video-worker.md](docs/video-worker.md) |
+| CV baseline/export та застосовані патчі | [cv-prototype.md](docs/cv-prototype.md), [patches/README.md](patches/README.md) |
+| Паралельність, черга, масштабування, admin | [R5](docs/parallel-processing.md), [R6](docs/queue-eta.md), [R7](docs/autoscaling.md), [R8](docs/admin-monitoring.md) |
+| Правила роботи з репозиторієм | [AGENTS.md](AGENTS.md) |
 
-Python venv уже готовий. Лише якщо його немає:
+<details>
+<summary>Історичні плани й звіти — для доказів, не щоденного запуску</summary>
 
-```powershell
-wsl -d Ubuntu --exec bash scripts/cv/setup-python-wsl.sh
-```
+- [Початковий чотириденний план](docs/day-plan.md) і [аудит Промпта 5](docs/day1-report.md) фіксують попередній стан; нові функції вже прийняті у наступних етапах.
+- [Backend Промпта 3](docs/backend-prototype.md) і [frontend Промпта 4](docs/frontend-prototype.md) містять унікальні job_id, PID, часи, cleanup/restart докази та screenshots. Старий HTTP/no-auth режим у них історичний.
+- [Початкові промпти користувача](<MonoTrajectoryWeb-Day-01-Codex-Prompts (1).md>) — вхідний матеріал, не чинна конфігурація або команда виконати етапи заново.
+- Звіти R5–R8 містять також невдалі спроби й старі ресурсні пороги. Прийняті результати та чинні межі зазначені окремо; старі невдалі спроби не зараховані за приймання.
 
-Скрипт збирання інкрементально збирає patched core і тонкий драйвер, зберігаючи підготовлені залежності. `run-export.sh` створює новий каталог у WSL, спостерігає повні JSONL-записи під час роботи, запускає перевірку й будує графік через локальний venv. Залежності повторно збирати не потрібно. Для окремого повторення стандартного прикладу є `scripts/cv/run-baseline.sh`.
+</details>
 
-Перевірений експорт лежить у `/home/demus/.local/share/monotrajectoryweb/runs/export-verified-20261101-abi/`: `snapshots.jsonl`, `trajectory.json`, `map_points.json`, `native-summary.json`, `run-summary.json`, `validation.json`, `trajectory.png`. Wall time — 39,144 с; processing — 31,586 с, або 25,264 кадр/с для всього циклу декодування/обробки/експорту без pacing. Це не гарантія швидкості чистого SLAM. Фінальна траєкторія є підмножиною: недоступні посилання на ключові кадри пропускаються явно, розриви на графіку збережено.
+## Перевірки та допоміжні файли
 
-Upstream-порядок Shutdown незмінний. Snapshot-патч додає числові копії даних, спостереження завершення потоків та перевірку двох повних знімків після їх завершення. Калібрування TUM1 геометрично незмінне; тільки `Camera.RGB=0` відповідає BGR-декодуванню OpenCV. Глибина й ground truth не подаються ядру. Перевірено одну карту/сегмент; реальні сценарії reset ще не перевірялися.
+Після зміни frontend перевірений entry point — `wsl -d Ubuntu --exec bash scripts/build-ui`: TypeScript, data/api/queue/admin tests і Vite build. `frontend/package.json` → `npm test` наразі запускає тільки data/api subset. Збережене приймання R8 має 11 frontend tests/build; повторювати build без зміни коду не потрібно.
 
-Великі вихідники, залежності, build, датасети, БД та результати розміщені у native файловій системі WSL, поза OneDrive і `/mnt/c`. Репозиторій не переносився. Сам VHDX цього середовища має backing volume C:, тому вільне місце контролюється також на `/mnt/c`: резерв 5 GiB плюс 2 GiB у native FS. Без політики retention історичні медіа треба контролювати. Після переповнення C: 01.11 і відновлення місця 02.11 повний E2E повторно пройшов; деталі та відновлення пошкоджених документів наведені у звіті.
+Backend `test_*.py` — регресійні перевірки; PostgreSQL boundary tests потребують явного `MTW_POSTGRES_TESTS=1` та disposable schema. Конкретні suites й відмінність 58/56 methods описані у [фінальному звіті](docs/final-acceptance.md). Blanket запуск усіх acceptance helpers на робочій БД не є smoke-перевіркою.
 
-R7 зберігається в плані. Відповідність автоматичного розширення лише процесами на одному вузлі наведеним в умові ВМ/контейнерам залишається відкритим питанням.
+Історичні HTTP CLI `e2e.py`, `upload_checks.py`, `parallel_e2e.py`, `parallel_short.py`, `parallel_isolation.py`, CLI-гілка `check_parallel_results.py`, browser harnesses `browser.mjs`/`history-browser.mjs` не адаптовані до чинного login/HTTPS. Їхні старі команди не слід виконувати як поточне приймання. Модулі залишені: сучасні HTTPS helpers імпортують `signature()` з `parallel_e2e.py` та `validate()` з `check_parallel_results.py`.
+
+Новіші acceptance helpers теж прив'язані до конкретних запусків: queue очікував 51 стару задачу, admin — 71, final — 72; autoscale має `--expected-jobs`. Вони не призначені для автоматичного повтору на поточній БД. Скрипти моніторингу, генерації fixtures, CV reproduction й неактивні offline/shutdown патчі збережені для відтворення та попередніх явно замовлених експериментів, не є зайвим runtime-сміттям.
 
 ## Git і дані
 
-Дозволені тільки локальні коміти перевірених змін. Користувач підтвердив `versal217 <versaldata@gmail.com>`; перед кожним комітом автор і комітер перевіряються саме в середовищі виконання Git:
+Автор локальних комітів — підтверджений `versal217 <versaldata@gmail.com>`; перевіряти effective author/committer перед комітом. Публікацію виконує користувач. Паролі, токени, service/proxy keys, приватні TLS-ключі, PostgreSQL, datasets, videos, build і результати не додаються до Git; lock-файли та перевірені малі fixtures відстежуються.
 
-```powershell
-git status --short --branch
-git config --show-origin --get-regexp '^user\.(name|email)$'
-git var GIT_AUTHOR_IDENT
-git var GIT_COMMITTER_IDENT
-```
-
-Якщо даних немає або вказаний бот, підготовка продовжується без комітів до отримання точного імені та email користувача. Нові дані налаштовуються лише локально в репозиторії. Глобальна конфігурація та наявна історія не змінюються; бот не додається до `Co-authored-by`.
-
-Push, Publish/Sync та запис змін через GitHub API заборонені; публікацію виконує користувач. Remote під час підготовки не додавався.
-
-`.gitignore` виключає секрети й локальні `.env`, ключі/сертифікати, середовища, build, `node_modules`, дані БД, датасети, відео та результати запусків. `.env.example` можна відстежувати лише з безпечними заповнювачами. Lock-файли залежностей відстежуються. Малі fixtures можна додавати окремо після перевірки розміру та вмісту; автоматичного винятку для всіх файлів fixtures немає.
+Користувацькі незакомічені зміни файла промптів і `Release` збережені окремо. Документи з доказами не видаляються лише через те, що вони не потрібні процесу API для запуску.

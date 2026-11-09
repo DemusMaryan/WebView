@@ -19,6 +19,11 @@
 
 Результат теми: оцінена траєкторія камери та розріджені 3D-точки із записаного монокулярного відео, у відносному масштабі. Живий потік, повторна локалізація у збереженій кімнаті та щільна фотореалістична модель не входять у межі проєкту.
 
+<details>
+<summary>Історичні докази етапів 3–12 — статуси саме на дати перевірок</summary>
+
+Згадки «ще немає», старі кількості задач, HTTP/no-auth та невдалі спроби нижче залишені як історичні докази. Поточні статуси — у матриці вище; остаточне приймання — у [final-acceptance.md](final-acceptance.md). Старі acceptance-команди не слід повторювати на робочій БД без адаптації.
+
 ## Докази Промпта 3, 02.11.2026
 
 - R1: справжні corrupted/frame/duration/resolution/calibration помилки; HTTP 413 для file/body/chunked caps. Native timeout 45 с завершив worker і mono_export за 45,039 с; обидва слоти вільні. Вісім unittest пройшли, включно з перевіркою переповнення backing volume при вільному virtual FS.
@@ -106,3 +111,5 @@ R8: /admin та GET /api/admin/monitoring захищені роллю PostgreSQL
 Рівно1 новий real job40a914a2-0c06-4bbb-9a8e-bd3b2064ac44: compute1, worker7327/native7367; 300 frames/live251/final192/points2746, cap100000 без обрізання, Twc/PTS/null/segments/final consistency valid. API/панель бачили native CPU/RSS; 9 CPU-rate та36 PID/namespace зіставлень passed. Після завершення slot0, native/worker відсутні, cleanup не порушив результат. Два container-only display probes без SLAM: виправлено runtime role label, фінально supervisor8385/init8387(local1)/application8390(local4), host PID унікальні, після stop remaining=[]; baseline2/compute3 stopped відновлено.
 
 56 унікальних backend tests,11 frontend tests/build, два isolated HTTPS browser contexts, stale/recovery/navigation/logout і screenshots перевірені. Browser ignoreHTTPSErrors=true не підтверджує системну довіру; окремий production curl --cacert без -k підтвердив TLS/hostname й anonymous401. Всі71 попередні rows/owner/files/user fields, CV/R5/R6/R7 hashes збережені; тепер72. Резерв5GiB збережений, RAM/commit informational, CV/dependencies/ABI/shutdown не змінено. Фінальний етап не починався. [Повний контракт метрик, команди, докази й обмеження](admin-monitoring.md).
+
+</details>

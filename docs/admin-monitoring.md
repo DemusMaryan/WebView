@@ -1,5 +1,7 @@
 # Промпт 12: панель адміністратора — R8
 
+> Приймання R8 від 05.11.2026: наведені counts/PID/CPU/RSS — вимірювання того запуску, не live status. Поточний стан показують `scripts/status` та панель. Фінальне HTTPS UI/restart приймання завершено у [Промпті13](final-acceptance.md). `admin_evidence.py` має конкретний baseline71 jobs і не запускається автоматично на новій БД.
+
 **Перевірено 05.11.2026.** Захищена read-only панель: **https://127.0.0.1:8443/admin**. Роль зберігається у PostgreSQL, призначається лише явно локальним оператором. У робочій БД адміністраторів **0**: користувач не вказував облікового запису для призначення. Браузерне приймання проведено в disposable schema на https://127.0.0.1:8444/admin з тими самими API/UI та справжнім production monitoring cache. Жодних admin-прав робочому test account не надавали.
 
 ## Доступ і запуск
@@ -91,7 +93,7 @@ Prepare був виконаний **до міграції**, коли було71
 | worker / native host PID | 7327 / 7367 |
 | Результат | succeeded, 300 frame records, 251 valid live, 192 final poses, 2746 points |
 | Export cap | 100000, truncation=false |
-| Worker wall | 33,582 с monotonic; decode/vocabulary/native pacing/export, не чистий SLAM |
+| Worker wall | 33,582 с у manifest: decode/vocabulary/native processing/export/validation без playback pacing; manager cleanup виключено. Окремий total compute `Job.execution_seconds` — 34,591 с, із запуском child/wait/reap/cleanup; queue/upload виключено |
 | Перевірка геометрії | JSONL/PTS/Twc/null/segments/quaternions/finite points і final_snapshot_consistency passed |
 | Реальні метрики | 10 різних native snapshots; CPU максимум серед samples245,22% одного CPU, RSS максимум585764864 bytes |
 | Звірка CPU | 9 інтервалів повторно обчислені з ticks/monotonic, усі відповідають показаному CPU з точністю округлення |

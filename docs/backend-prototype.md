@@ -1,5 +1,7 @@
 # Промпт 3: нативний worker, PostgreSQL і API
 
+> Історичний звіт станом на 02.11.2026. HTTP/no-auth, один слот і наведені CLI-команди описують саме той прогін. Сьогодні користувацький вхід — HTTPS8443 з login/CSRF, ready2/max3, R1–R8 прийняті. Звичайний запуск/зупинка — [README](../README.md), контракт — [api-contract.md](api-contract.md), докази — [final-acceptance.md](final-acceptance.md). Старі `e2e.py`/`upload_checks.py` не є чинною smoke-перевіркою; для повної зупинки тепер `scripts/stop`, потім `scripts/stop postgres`, із monitor/autoscaler також.
+
 > Це історичний звіт. Поточний list-контракт, stored/pending ліміти та докази Промпта 7 — у [api-contract.md](api-contract.md); поточні два слоти й прийняті паралельні результати R5 — у [parallel-processing.md](parallel-processing.md).
 
 **Перевірено 2 листопада 2026 року; Промпт 3 завершено.** Це історичний backend-звіт; frontend додано й перевірено окремо у [Промпті 4](frontend-prototype.md). Прототип доступний лише на localhost, `owner_id=null`, автентифікація й HTTPS заплановані. Два compute-процеси підготовлені; dispatcher запускає **одну** задачу одночасно. Паралельне балансування R5 ще не доведене.
@@ -96,7 +98,7 @@ E2E 02.11.2026: 19:27:46,955–19:30:38,384 Europe/Kyiv (17:27–17:30 UTC), **1
 
 Worker wall time успішного відео — **62,461 с**, з них decode **26,810 с**, native total **35,121 с** (processing **28,695 с**). Wall включає декодування, startup/vocabulary, tracking/mapping, файловий ввід/вивід, JSONL/snapshot, shutdown/quiescence та фінальну перевірку; черга й HTTP upload до нього не входять. Runner без pacing. Ці числа не є чистою швидкістю SLAM.
 
-Повні докази поза Git: `web/reports/prompt3-e2e-20261102.json` і `web/reports/upload-checks.json`; артефакти — `web/jobs/<job_id>/`. Відтворення перевірок із PowerShell після start:
+Повні докази поза Git: `web/reports/prompt3-e2e-20261102.json` і `web/reports/upload-checks.json`; артефакти — `web/jobs/<job_id>/`. Нижче команди історичного прогону Промпта3 до auth/HTTPS, не поточна інструкція повтору на робочій БД:
 
 ```powershell
 wsl -d Ubuntu --exec env PYTHONPATH=backend /home/demus/.local/share/monotrajectoryweb/web-venv/bin/python -m unittest discover -s backend/tests -v
