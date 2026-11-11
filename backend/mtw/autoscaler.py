@@ -14,7 +14,7 @@ from .config import DATA,PORTS
 from .db import ComputeServer,Job,Session,now
 from .files import atomic_json,read_json
 from .processes import identity
-from .servers import BASE,SETTINGS,reserve_launch,launch_failed
+from .servers import BASE,SETTINGS,compute_route,reserve_launch,launch_failed
 from .service_auth import service_headers
 
 stopping=False
@@ -166,7 +166,7 @@ def run():
                             proxy_ready=False
                             while time.monotonic()<proxy_deadline:
                                 try:
-                                    probe=httpx.get(f'http://127.0.0.1:{PORTS["balancer"]}/health',headers=service_headers(),timeout=1,trust_env=False)
+                                    probe=httpx.get(f'http://127.0.0.1:{PORTS["balancer"]}{compute_route("compute-3", "health")}',headers=service_headers(),timeout=1,trust_env=False)
                                     if probe.status_code==200 and probe.json().get('server_id')=='compute-3': proxy_ready=True; break
                                 except (httpx.HTTPError,ValueError): pass
                                 time.sleep(.1)

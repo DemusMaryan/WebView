@@ -129,8 +129,8 @@ class QueuePostgresTests(unittest.TestCase):
         self.assertEqual(self.estimate(UUID(int=11)), {"queue_position": None, "estimated_wait_seconds": None})
 
     def test_overdue_unknown_slot_and_remaining_progress_never_negative(self):
-        self.seed(10, status="running", stage="initializing", started_at=self.at-timedelta(seconds=100))
-        self.seed(11, status="running", stage="processing", started_at=self.at-timedelta(seconds=100),
+        self.seed(10, status="running", server_id='compute-1', stage="initializing", started_at=self.at-timedelta(seconds=100))
+        self.seed(11, status="running", server_id='compute-2', stage="processing", started_at=self.at-timedelta(seconds=100),
             total_frames=360, processed_frames=270)
         self.seed(1)
         self.assertEqual(self.estimate(UUID(int=1))["estimated_wait_seconds"], 10)

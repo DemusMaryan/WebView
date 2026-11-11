@@ -7,8 +7,8 @@ import subprocess
 from sqlalchemy import select
 from .config import CONFIG
 from .db import Job, now
-from .scheduler import ACTIVE, MAX_ACTIVE
-from .servers import ready_servers
+from .scheduler import ACTIVE
+from .servers import SERVERS, slot_snapshot
 
 SETTINGS = CONFIG["queue"]
 
@@ -79,13 +79,21 @@ def estimate_queue(session, target, at=None):
         return value if positive(value) else None
 
     active = list(session.scalars(select(Job).where(Job.status.in_(ACTIVE))))
-    capacity = min(MAX_ACTIVE,len(ready_servers(session,at)))
-    if not capacity or len(active) > capacity:
+    candidates, unresolved = slot_snapshot(session, at)
+    ready = [c for c in candidates if c['eligible']]
+    if not ready or unresolved:
         return {"queue_position": position, "estimated_wait_seconds": None}
-    slots = [0.0] * (capacity - len(active))
-    for job in active:
+    # Reservations occupy their assigned lane, even before a worker starts.
+    # An unavailable server's work must not consume a different ready lane.
+    by_server = {j.server_id: j for j in active if j.server_id in SERVERS}
+    slots = []
+    for candidate in ready:
+        job = by_server.get(candidate['server_id'])
+        if job is None:
+            slots.append(0.0)
+            continue
         predicted = duration(job)
-        elapsed = max(0, (at - job.started_at).total_seconds()) if job.started_at else 0
+        elapsed = max(0, (at - job.started_at).total_seconds()) if job.status == 'running' and job.started_at else 0
         remaining = predicted - elapsed if predicted is not None else None
         if predicted is not None and job.total_frames and job.stage == "processing":
             fraction = max(0, min(1, job.processed_frames / job.total_frames))

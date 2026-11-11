@@ -274,7 +274,7 @@ class AuthenticationPostgresTests(unittest.TestCase):
         compute = importlib.import_module("mtw.compute")
         from mtw import dispatcher
         key = secrets.token_hex(32)
-        reservation = {"job_id": str(uuid4()), "dispatch_token": str(uuid4())}
+        reservation = {"job_id": str(uuid4()), "dispatch_token": str(uuid4()), 'server_id': 'compute-1'}
         async def run():
             async with self.client() as browser:
                 await self.register(browser, "service_browser")
@@ -290,6 +290,7 @@ class AuthenticationPostgresTests(unittest.TestCase):
             def check(request):
                 self.assertTrue(request.headers.get("X-MTW-Service-Key") == key)
                 self.assertEqual(request.url.port, 8081)
+                self.assertEqual(request.url.path, '/internal/compute/compute-1/execute')
                 return httpx.Response(202, json={"status": "accepted"})
             async with httpx.AsyncClient(transport=httpx.MockTransport(check)) as c:
                 with patch.object(dispatcher, "still_reserved", side_effect=[True, False, False]):
@@ -308,7 +309,9 @@ class AuthenticationPostgresTests(unittest.TestCase):
             reservation_token = uuid4()
             with self.sessions.begin() as s:
                 from uuid import UUID
-                job = Job(owner_id=UUID(user["id"]), status="dispatching", stage="dispatching",
+                from mtw.db import ComputeServer
+                s.add(ComputeServer(server_id='compute-1',kind='native',state='ready',heartbeat_at=now()))
+                job = Job(owner_id=UUID(user["id"]), status="dispatching", stage="dispatching",server_id='compute-1',
                           dispatch_token=reservation_token, parameters={"execution_seconds": 180}, input_ref="fixture")
                 s.add(job); s.flush(); job_id = job.id
             finished = asyncio.Event()
@@ -409,7 +412,8 @@ class AuthenticationPostgresTests(unittest.TestCase):
             migrate('head')
             with migration_engine.connect() as c:
                 self.assertFalse(c.scalar(text("SELECT is_admin FROM users WHERE login='existing'")))
-                self.assertEqual(c.scalar(text('SELECT version_num FROM alembic_version')),'0006_admin_role')
+                self.assertEqual(c.scalar(text('SELECT version_num FROM alembic_version')),'0007_slot_assignment')
+                self.assertEqual(c.scalar(text('SELECT count(*) FROM compute_servers WHERE last_assigned_at IS NOT NULL')),0)
         finally:
             migration_engine.dispose()
             assert schema.startswith("mtw_migration_") and len(schema) == 46

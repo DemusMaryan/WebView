@@ -21,6 +21,7 @@ from .auth import BrowserSecurity, router as auth_router
 from .proxy import TrustedTLSProxy
 from .queue_eta import estimate_queue, probe_video
 from .admin import router as admin_router
+from .servers import SERVERS
 
 app = FastAPI(title="MonoTrajectoryWeb local API", version="0.8.0")
 app.include_router(auth_router)
@@ -245,7 +246,11 @@ def cancel(job_id: UUID, request: Request):
         if job.status not in TERMINAL:
             job.cancel_requested = True
             job.updated_at = now()
-            if job.status in {"queued", "dispatching"}:
+            if job.status == 'dispatching' and (job.server_id not in SERVERS or job.worker_pid
+                    or (job_dir(job_id)/'execution-start.json').exists()):
+                job.stage = 'assignment_unresolved'
+                job.error = 'Cancellation requested; ambiguous legacy launch requires process reconciliation'
+            elif job.status in {"queued", "dispatching"}:
                 cleanup_decoded_frames(job_dir(job_id))
                 job.status = job.stage = "cancelled"
                 job.finished_at = now()

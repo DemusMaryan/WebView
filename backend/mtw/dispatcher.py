@@ -5,16 +5,19 @@ import httpx
 from .config import PORTS
 from .scheduler import outstanding, reserve_next, still_reserved
 from .service_auth import service_headers
+from .servers import compute_route
 
 
 async def deliver(client, reservation, stop):
     # Retry the SAME token after an ambiguous HTTP reply. Compute accepts once.
     while not stop.is_set() and still_reserved(reservation):
         try:
-            response = await client.post(f"http://127.0.0.1:{PORTS['balancer']}/execute",
-                json=reservation, headers=service_headers() | {"X-MTW-Job": reservation["job_id"]})
-            print(f"handoff job_id={reservation['job_id']} via=nginx:{PORTS['balancer']} "
-                  f"http={response.status_code} body={response.text[:300]}", flush=True)
+            route = compute_route(reservation['server_id'])
+            response = await client.post(f"http://127.0.0.1:{PORTS['balancer']}{route}",
+                json={k: reservation[k] for k in ('job_id', 'dispatch_token')},
+                headers=service_headers() | {"X-MTW-Job": reservation["job_id"]})
+            print(f"handoff job_id={reservation['job_id']} server_id={reservation['server_id']} "
+                  f"via=nginx:{PORTS['balancer']}{route} http={response.status_code}", flush=True)
             if response.status_code not in (200, 202, 409, 502, 503, 504):
                 print("Unexpected compute response; reservation retained", flush=True)
         except httpx.HTTPError as error:

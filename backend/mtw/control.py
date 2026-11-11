@@ -139,12 +139,22 @@ def _write_nginx(add_server,exclude):
     certificates = tls.paths()
     forwarding_key = proxy_key()
     from .db import ComputeServer,Session
-    from .servers import ready_servers
+    from .servers import BASE, compute_route, ready_servers
     with Session() as session:
         extra=session.get(ComputeServer,'compute-3')
         include_extra=extra is not None and 'compute-3' in ready_servers(session)
     include_extra=(include_extra or add_server=='compute-3') and 'compute-3' not in exclude
     extra_upstream=f"        server 127.0.0.1:{PORTS['compute_3']};\n" if include_extra else ''
+    # Execution routing is deterministic; only health retains an aggregate upstream.
+    routes = ''
+    for name in (*BASE, *(('compute-3',) if include_extra else ())):
+        for action in ('execute', 'health'):
+            routes += f'''        location = {compute_route(name, action)} {{
+            proxy_pass http://127.0.0.1:{PORTS[name.replace('-', '_')]}/{action};
+            proxy_read_timeout 3s;
+            proxy_next_upstream off;
+        }}
+'''
     prefix = DATA / "nginx"
     prefix.mkdir(exist_ok=True)
     prefix.chmod(0o700)
@@ -215,11 +225,8 @@ http {{
     }}
     server {{
         listen 127.0.0.1:{PORTS['balancer']};
-        location = /execute {{
-            proxy_pass http://computes;
-            proxy_read_timeout {int(LIMITS['execution_seconds']) + 30}s;
-            proxy_next_upstream off;
-        }}
+        location = /execute {{ return 404; }}
+{routes}
         location = /health {{ proxy_pass http://computes; }}
         location / {{ return 404; }}
     }}

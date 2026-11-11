@@ -111,7 +111,7 @@ class AdminPostgresTests(unittest.TestCase):
     def test_queue_slots_unreachable_server_and_no_sensitive_process_fields(self):
         with self.sessions.begin() as s:
             seed_test_baseline(s);s.add(ComputeServer(server_id='compute-3',kind='nspawn',state='stopped'))
-            for i in (1,2):s.add(Job(server_id=f'compute-{i}',status='running',parameters={},input_ref='must-not-leak',started_at=now()))
+            for i in (1,2):s.add(Job(server_id=f'compute-{i}',status='running' if i==1 else 'dispatching',parameters={},input_ref='must-not-leak',started_at=now() if i==1 else None))
             for _ in range(2):s.add(Job(parameters={},input_ref='not-serialized'))
         collector=monitoring.Collector(self.sessions)
         self.addCleanup(collector.client.close)
@@ -121,6 +121,7 @@ class AdminPostgresTests(unittest.TestCase):
         self.assertEqual(value['capacity']['active'],2)
         self.assertEqual(value['servers'][1]['health'],'unavailable')
         self.assertTrue(all(s['slot_used'] for s in value['servers'][:2]))
+        self.assertEqual(value['servers'][1]['job_state'],'dispatching')
         self.assertTrue(all(j['estimated_wait_seconds'] is None or j['estimated_wait_seconds']>=0 for j in value['queue']))
         encoded=json.dumps(value)
         for secret in ('_argv','password_hash','token_hash','database-url','must-not-leak','not-serialized'):

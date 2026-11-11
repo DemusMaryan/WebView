@@ -19,10 +19,11 @@ from .capacity import ensure_space
 from .frame_work import cleanup_decoded_frames
 from .scheduler import SERVERS
 from .service_auth import require_service
+from .servers import ready_servers
 
 SERVER_ID = os.environ["MTW_SERVER_ID"]
 if SERVER_ID not in SERVERS:
-    raise RuntimeError("Unknown compute server; only two configured slots are allowed")
+    raise RuntimeError("Unknown compute server; only three allowlisted servers are allowed")
 slot = asyncio.Lock()
 active = None
 manager_task = None
@@ -41,13 +42,25 @@ async def lifespan(app):
         raise RuntimeError(f"Another process owns {SERVER_ID}")
     lease.commit()
     try:
+        with Session.begin() as session:
+            registry = session.get(ComputeServer, SERVER_ID)
+            if registry:
+                if registry.state != 'starting':
+                    registry.state = 'stopped'
+                registry.heartbeat_at = None
         # A compute restart terminates its own stale groups, never another server.
         with Session() as session:
             stale = list(session.scalars(select(Job).where(Job.server_id == SERVER_ID, Job.status == "running")))
         for job in stale:
-            if job.worker_pid:
-                await terminate_group(job.worker_pid, job.worker_start_ticks, job.id, job_dir(job.id))
-            cleanup_decoded_frames(job_dir(job.id), job.worker_pid)
+            record = read_json(job_dir(job.id)/'worker-process.json', {})
+            pid = job.worker_pid or record.get('pid')
+            ticks = job.worker_start_ticks or record.get('start_ticks')
+            if pid:
+                await terminate_group(pid, ticks, job.id, job_dir(job.id))
+                await reap_group(pid)
+            elif (job_dir(job.id)/'execution-start.json').exists():
+                raise RuntimeError('Unresolved launch identity; reservation retained for inspection')
+            cleanup_decoded_frames(job_dir(job.id), pid)
             with Session.begin() as session:
                 current = session.get(Job, job.id)
                 current.status = current.stage = "cancelled" if current.cancel_requested else "failed"
@@ -103,16 +116,16 @@ async def execute(request: Execution):
     try:
         with Session.begin() as session:
             job = session.scalar(select(Job).where(Job.id == request.job_id).with_for_update())
-            if job is None or job.dispatch_token != request.dispatch_token:
+            if job is None or job.dispatch_token != request.dispatch_token or job.server_id != SERVER_ID:
                 raise HTTPException(409, "Invalid reservation")
             if job.status == "running" and job.server_id == SERVER_ID and active == str(job.id):
                 return accepted(job, duplicate=True)
             if job.status != "dispatching":
                 raise HTTPException(409, "Job has already been started or finished")
-            if SERVER_ID == "compute-3":
-                registry = session.get(ComputeServer,SERVER_ID)
-                if registry is None or registry.state != "ready":
-                    raise HTTPException(409,"Container is not ready in the load balancer")
+            if SERVER_ID not in ready_servers(session):
+                raise HTTPException(409, 'Assigned server is not ready')
+            if job.worker_pid or (job_dir(job.id)/'execution-start.json').exists():
+                raise HTTPException(409, 'Unresolved prior launch; reservation retained')
             if slot.locked():
                 raise HTTPException(409, "Compute slot is occupied; retry same reservation")
             if job.cancel_requested:
@@ -124,7 +137,6 @@ async def execute(request: Execution):
             acquired = True
             job.status = "running"
             job.stage = "decoding"
-            job.server_id = SERVER_ID
             job.started_at = job.updated_at = now()
             budget = job.parameters["execution_seconds"]
             session.flush()  # Partial unique index also guards this server slot.
